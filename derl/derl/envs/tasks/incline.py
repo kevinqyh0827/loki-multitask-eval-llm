@@ -1,5 +1,5 @@
 import numpy as np
-from gym import utils
+from gymnasium import utils
 
 from derl.config import cfg
 from derl.envs.modules.agent import Agent

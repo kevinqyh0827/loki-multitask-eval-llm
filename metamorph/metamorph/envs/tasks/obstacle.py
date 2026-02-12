@@ -1,4 +1,4 @@
-from gym import utils
+from gymnasium import utils
 import importlib
 
 from metamorph.config import cfg

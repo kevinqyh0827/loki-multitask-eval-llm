@@ -1,5 +1,5 @@
 import numpy as np
-from gym import utils
+from gymnasium import utils
 
 import importlib
 

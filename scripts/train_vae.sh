@@ -13,7 +13,7 @@ NUM_EPOCHS=200
 LOG_PATH="./log/train_vae"
 mkdir -p $LOG_PATH
 
-LOG_FILE="$LOG_PATH/VAE_500k_hdim${H_DIM}_depth${D_DEPTH}_LR_${LR}_WD_${WDS}_L${NUM_LAYER}_H${NUM_HEAD}_F${FACTOR}_beta0.01_bsize${BATCH_SIZE}_epochs${NUM_EPOCHS}.log"
+LOG_FILE="$LOG_PATH/VAE_50k_hdim${H_DIM}_depth${D_DEPTH}_LR_${LR}_WD_${WDS}_L${NUM_LAYER}_H${NUM_HEAD}_F${FACTOR}_beta0.01_bsize${BATCH_SIZE}_epochs${NUM_EPOCHS}.log"
 PYTHONPATH=. python vae/train.py \
                         --gpu 0 \
                         --lr 1e-4 \

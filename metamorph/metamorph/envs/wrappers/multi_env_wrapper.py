@@ -4,10 +4,10 @@ import os
 import random
 import torch
 
-import gym
+import gymnasium as gym
 import numpy as np
-from gym import spaces
-from gym import utils
+from gymnasium import spaces
+from gymnasium import utils
 
 try:
     from metamorph.config import cfg
@@ -26,7 +26,7 @@ except:
 
 
 
-class MultiEnvWrapper(utils.EzPickle):
+class MultiEnvWrapper(gym.Env, utils.EzPickle):
     def __init__(self, env, env_idx):
         # Identify the idx of the env within N subproc envs
         self.multi_env_idx = env_idx
@@ -202,9 +202,9 @@ class MultiUnimalNodeCentricObservation(gym.ObservationWrapper):
 class MultiUnimalNodeCentricAction(gym.ActionWrapper):
     def __init__(self, env):
         super().__init__(env)
-        self._update_action_space()
         self.max_limbs = cfg.MODEL.MAX_LIMBS
         self.max_joints = cfg.MODEL.MAX_JOINTS
+        self._update_action_space()
 
     def _update_action_space(self):
         num_joints = self.metadata["num_joints"]

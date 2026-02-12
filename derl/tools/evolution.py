@@ -398,11 +398,13 @@ def main():
     # Infer OPTIM.MAX_ITERS
     calculate_max_iters()
     setup_output_dir()
+    print("Finish calculating max iters and setup output dir: ", cfg.PPO.MAX_ITERS, cfg.OUT_DIR)
     cfg.freeze()
 
     # Save the config
     dump_cfg()
 
+    print("Start evolution...")
     evolve()
 
 

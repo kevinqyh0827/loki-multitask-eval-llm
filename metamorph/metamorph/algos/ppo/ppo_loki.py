@@ -612,13 +612,40 @@ class LOKI:
     def _log_fps(self, cur_iter, log=True):
         env_steps = self.env_steps_done(cur_iter)
         end = time.time()
-        self.fps = int(env_steps / (end - self.start))
+        elapsed = end - self.start
+        self.fps = int(env_steps / elapsed)
         if log:
+            # Calculate ETA
+            start_iter = cfg.LOKI.RESUME_ITER + 1
+            iters_done = cur_iter - start_iter + 1
+            iters_remaining = cfg.PPO.MAX_ITERS - cur_iter - 1
+            if iters_done > 0:
+                secs_per_iter = elapsed / iters_done
+                eta_secs = secs_per_iter * iters_remaining
+                eta_h = int(eta_secs // 3600)
+                eta_m = int((eta_secs % 3600) // 60)
+                eta_s = int(eta_secs % 60)
+                elapsed_h = int(elapsed // 3600)
+                elapsed_m = int((elapsed % 3600) // 60)
+                elapsed_s = int(elapsed % 60)
+                progress = (iters_done / (cfg.PPO.MAX_ITERS - start_iter)) * 100
+                eta_str = (
+                    f"Progress: {progress:.1f}% ({iters_done}/{cfg.PPO.MAX_ITERS - start_iter}) | "
+                    f"Elapsed: {elapsed_h:02d}:{elapsed_m:02d}:{elapsed_s:02d} | "
+                    f"ETA: {eta_h:02d}:{eta_m:02d}:{eta_s:02d} | "
+                    f"Iter time: {secs_per_iter:.2f}s"
+                )
+            else:
+                eta_str = "ETA: calculating..."
             print(
-                "Updates {}, num timesteps {}, FPS {}".format(
-                    cur_iter, env_steps, self.fps
+                "Updates {}, num timesteps {}, FPS {} | {}".format(
+                    cur_iter, env_steps, self.fps, eta_str
                 )
             )
+            wandb.log({
+                "fps": self.fps,
+                "elapsed_hours": elapsed / 3600,
+            }, step=env_steps)
 
     def env_steps_done(self, cur_iter):
         return (cur_iter + 1) * cfg.PPO.NUM_ENVS * cfg.PPO.TIMESTEPS

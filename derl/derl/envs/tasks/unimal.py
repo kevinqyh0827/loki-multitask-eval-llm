@@ -1,15 +1,16 @@
 from collections import OrderedDict
 
-import gym
-import mujoco_py
+import gymnasium as gym
+import mujoco
 import numpy as np
-from gym import spaces
-from gym.utils import seeding
+from gymnasium import spaces
+from gymnasium.utils import seeding
 
 import derl.utils.exception as exu
 from derl.config import cfg
 from derl.utils import spaces as spu
 from derl.utils import xml as xu
+from derl.utils.mjpy import MjSim, MjSimState
 
 DEFAULT_SIZE = 1024
 DEFAULT_CAMERA_CONFIG = {
@@ -65,8 +66,8 @@ class UnimalEnv(gym.Env):
             module.modify_xml_step(self, root, tree)
 
         xml_str = xu.etree_to_str(root)
-        model = mujoco_py.load_model_from_xml(xml_str)
-        sim = mujoco_py.MjSim(model)
+        model = mujoco.MjModel.from_xml_string(xml_str)
+        sim = MjSim(model)
         # Update module fields which require sim
         for _, module in self.modules.items():
             module.modify_sim_step(self, sim)
@@ -149,7 +150,7 @@ class UnimalEnv(gym.Env):
             self.sim.model.nv,
         )
         old_state = self.sim.get_state()
-        new_state = mujoco_py.MjSimState(
+        new_state = MjSimState(
             old_state.time, qpos, qvel, old_state.act, old_state.udd_state
         )
         self.sim.set_state(new_state)
@@ -194,47 +195,52 @@ class UnimalEnv(gym.Env):
             if no_camera_specified:
                 camera_name = "side"
 
-            if (
-                camera_id is None
-                and camera_name in self.sim.model._camera_name2id
-            ):
-                camera_id = self.sim.model.camera_name2id(camera_name)
+            if camera_id is None and camera_name is not None:
+                camera_id = mujoco.mj_name2id(
+                    self.sim.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
+                )
+                if camera_id == -1:
+                    raise ValueError(f"Camera '{camera_name}' not found in model")
 
-            self._get_viewer(mode).render(width, height, camera_id=camera_id)
-            # window size used for old mujoco-py:
-            data = self._get_viewer(mode).read_pixels(width, height, depth=False)
-            # original image is upside-down, so flip it
-            return data[::-1, :, :]
+            renderer = self._get_viewer(mode, width, height)
+            renderer.update_scene(self.sim.data, camera=camera_id)
+            # Render and read pixels
+            data = renderer.render()
+            # mujoco.Renderer returns RGB image in correct orientation
+            return data
         elif mode == "depth_array":
-            self._get_viewer(mode).render(width, height)
-            # window size used for old mujoco-py:
-            # Extract depth part of the read_pixels() tuple
-            data = self._get_viewer(mode).read_pixels(width, height, depth=True)[
-                1
-            ]
-            # original image is upside-down, so flip it
-            return data[::-1, :]
+            renderer = self._get_viewer(mode, width, height)
+            renderer.update_scene(self.sim.data, camera=camera_id)
+            # Enable depth rendering
+            renderer.enable_depth_rendering()
+            renderer.render()
+            depth_data = renderer.depth()
+            # Return depth data
+            return depth_data
         elif mode == "human":
-            self._get_viewer(mode).render()
+            renderer = self._get_viewer(mode, width, height)
+            renderer.update_scene(self.sim.data)
+            # For human mode, just render (display would require window management)
+            return renderer.render()
 
-    def _get_viewer(self, mode):
-        self.viewer = self._viewers.get(mode)
+    def _get_viewer(self, mode, width=DEFAULT_SIZE, height=DEFAULT_SIZE):
+        cache_key = (mode, width, height)
+        self.viewer = self._viewers.get(cache_key)
         if self.viewer is None:
             if mode == "human":
-                self.viewer = mujoco_py.MjViewer(self.sim)
+                # For human mode, use offscreen rendering
+                # Interactive viewing requires a different approach in new mujoco
+                self.viewer = mujoco.Renderer(self.sim.model, width, height)
             elif mode == "rgb_array" or mode == "depth_array":
-                self.viewer = mujoco_py.MjRenderContextOffscreen(self.sim, -1)
+                self.viewer = mujoco.Renderer(self.sim.model, width, height)
 
-            self.viewer_setup()
-            self._viewers[mode] = self.viewer
+            self._viewers[cache_key] = self.viewer
         return self.viewer
 
     def viewer_setup(self):
-        for key, value in DEFAULT_CAMERA_CONFIG.items():
-            if isinstance(value, np.ndarray):
-                getattr(self.viewer.cam, key)[:] = value
-            else:
-                setattr(self.viewer.cam, key, value)
+        # Camera setup is now done through scene options in new mujoco
+        # This is a placeholder for backward compatibility
+        pass
 
     def close(self):
         if self.viewer is not None:

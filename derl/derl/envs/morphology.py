@@ -905,7 +905,7 @@ class SymmetricUnimal:
         """Check if current unimal is symmetric along BODY.SYMMETRY_PLANE."""
 
         # Get unimal center of mass (com)
-        head_idx = sim.model.body_name2id(HEAD)
+        head_idx = mu.mj_name2id(sim, "body", HEAD)
         unimal_com = sim.data.subtree_com[head_idx, :]
         # Center of mass should have zero component along axis normal to
         # cfg.BODY.SYMMETRY_PLANE.

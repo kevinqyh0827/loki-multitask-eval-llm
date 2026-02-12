@@ -2,7 +2,7 @@ import time
 from collections import defaultdict
 from collections import deque
 
-import gym
+import gymnasium as gym
 import torch
 
 import derl.envs  # Register envs

@@ -105,11 +105,11 @@ class Agent:
         ]
         self.edges = self._get_edges(sim)
         env.metadata["num_limbs"] = len(self.agent_body_idxs)
-        env.metadata["num_joints"] = len(sim.model.joint_names) - 1
+        env.metadata["num_joints"] = sim.model.njnt - 1
         # Useful for attention map analysis
-        env.metadata["edge_name"] = list(sim.model.joint_names)[1:]
+        env.metadata["edge_name"] = [sim.model.joint(i).name for i in range(1, sim.model.njnt)]
         env.metadata["limb_name"] = [
-            sim.model.body_names[idx] for idx in self.agent_body_idxs
+            sim.model.body(idx).name for idx in self.agent_body_idxs
         ]
         self.joint_mask_for_node_graph = self.get_joint_mask_for_node_graph(
             env.metadata["edge_name"]

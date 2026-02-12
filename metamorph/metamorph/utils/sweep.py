@@ -1,4 +1,4 @@
-from collections import MutableMapping
+from collections.abc import MutableMapping
 
 
 # Refer: https://stackoverflow.com/questions/6027558/flatten-nested-dictionaries-compressing-keys

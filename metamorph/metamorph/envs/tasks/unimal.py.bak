@@ -6,14 +6,26 @@ import mujoco_py
 import numpy as np
 from gymnasium import spaces
 from gymnasium.utils import seeding
+import torch
 
-from metamorph.config import cfg
-from metamorph.utils import exception as exu
-from metamorph.utils import file as fu
-from metamorph.utils import spaces as spu
-from metamorph.utils import sample as su
-from metamorph.utils import xml as xu
-from metamorph.envs.modules.agent import create_agent_xml
+try:
+    from metamorph.config import cfg
+    from metamorph.utils import exception as exu
+    from metamorph.utils import file as fu
+    from metamorph.utils import spaces as spu
+    from metamorph.utils import sample as su
+    from metamorph.utils import xml as xu
+    from metamorph.envs.modules.agent import create_agent_xml
+except:
+    import sys
+    sys.path.append("..")
+    from metamorph.metamorph.config import cfg
+    from metamorph.metamorph.utils import exception as exu
+    from metamorph.metamorph.utils import file as fu
+    from metamorph.metamorph.utils import spaces as spu
+    from metamorph.metamorph.utils import sample as su
+    from metamorph.metamorph.utils import xml as xu
+    from metamorph.metamorph.envs.modules.agent import create_agent_xml
 
 
 DEFAULT_SIZE = 1024
@@ -42,7 +54,7 @@ class UnimalEnv(gym.Env):
             "render.modes": ["human", "rgb_array", "depth_array"],
             "unimal_id": unimal_id,
             "markers": [],
-            "metadata": self._load_unimal_metadata(),
+            # "metadata": self._load_unimal_metadata(),
             "mirrored": False,
         }
         self.observation_space = None
@@ -50,23 +62,32 @@ class UnimalEnv(gym.Env):
         self.module_classes = []
         self.modules = OrderedDict()
         self.seed()
-        self.unimal_xmls = self._load_all_unimals()
+        self.unimal_xmls, self.unimal_latent_noise = self._load_all_unimals(skip_latent=True)
 
-    def _load_all_unimals(self):
-        dir_path = os.path.join(cfg.ENV.WALKER_DIR, "xml")
+    def _load_all_unimals(self, skip_xml=False, skip_latent=False):
+        dir_path = os.path.join(cfg.ENV.WALKER_DIR, "xml_step", "0") # initial xmls
         xml_paths = [
             os.path.join(dir_path, "{}.xml".format(walker_name))
             for walker_name in cfg.ENV.WALKERS
         ]
-        return [create_agent_xml(path) for path in xml_paths]
+        if skip_latent:
+            return [create_agent_xml(path) for path in xml_paths], []
+        dir_path = os.path.join(cfg.ENV.WALKER_DIR, "latents", "0")
+        latent_noise_paths = [
+            os.path.join(dir_path, "{}.pt".format(walker_name))
+            for walker_name in cfg.ENV.WALKERS
+        ]
+        if skip_xml:
+            return [], [torch.load(path, map_location=torch.device('cpu')).numpy() for path in latent_noise_paths]
+        return [create_agent_xml(path) for path in xml_paths], [torch.load(path, map_location=torch.device('cpu')).numpy() for path in latent_noise_paths]
 
-    def _load_unimal_metadata(self):
-        try:
-            path = os.path.join(cfg.ENV.WALKER_DIR, "metadata", "{}.json".format(self.unimal_id))
-            return fu.load_json(path)
-        except:
-            path = os.path.join(cfg.ENV.WALKER_DIR, "unimal_init", "{}.pkl".format(self.unimal_id))
-            return fu.load_pickle(path)
+    def _load_unimal_metadata(self, cur_iter):
+        # path = os.path.join(cfg.ENV.WALKER_DIR, "metadata", "{}.json".format(self.unimal_id))
+        path = os.path.join(
+            cfg.ENV.WALKER_DIR, "unimal_pkl_recons_sample", str(cur_iter), "{}.pkl".format(self.unimal_id)
+        )
+        # return fu.load_json(path)
+        return fu.load_pickle(path)
 
     def add_module(self, cname):
         self.module_classes.append(cname)
@@ -106,10 +127,21 @@ class UnimalEnv(gym.Env):
         self.metadata["unimal_id"] = unimal_id
         self.metadata["agent_idx"] = idx
         self.unimal_id = unimal_id
-        self.metadata["mirrored"] = su.sample_from_list(
-            [True, False], self.np_random
-        )
+        # self.metadata["mirrored"] = su.sample_from_list(
+        #     [True, False], self.np_random
+        # )
+        self.metadata["mirrored"] = False
         self.xml_str = self.unimal_xmls[idx]
+        # self.latent_noise = self.unimal_latent_noise[idx]
+    
+    def update_xml(self, idx):
+        self.xml_str = self.unimal_xmls[idx]
+
+    def update_one_unimal(self, idx=None, new_xml_str=None, cur_iter=0):
+        self.unimal_xmls[idx] = new_xml_str
+        self.metadata["metadata"] = self._load_unimal_metadata(cur_iter)
+        # _, self.unimal_latent_noise = self._load_all_unimals(skip_xml=True)
+        # print("Updated unimal xml", idx)
 
     ###########################################################################
     # Functions to setup env attributes
@@ -224,7 +256,7 @@ class UnimalEnv(gym.Env):
 
     def render(
         self,
-        mode="human",
+        mode="rgb_array",
         width=DEFAULT_SIZE,
         height=DEFAULT_SIZE,
         camera_id=None,
@@ -270,7 +302,7 @@ class UnimalEnv(gym.Env):
             if mode == "human":
                 self.viewer = mujoco_py.MjViewer(self.sim)
             elif mode == "rgb_array" or mode == "depth_array":
-                self.viewer = mujoco_py.MjRenderContextOffscreen(self.sim, -1)
+                self.viewer = mujoco_py.MjRenderContextOffscreen(self.sim, 0)
 
             self.viewer_setup()
             self._viewers[mode] = self.viewer

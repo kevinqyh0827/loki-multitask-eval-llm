@@ -1,9 +1,9 @@
 from collections import OrderedDict
 
 import numpy as np
-from gym import spaces
-from gym.spaces import Box
-from gym.spaces import Dict
+from gymnasium import spaces
+from gymnasium.spaces import Box
+from gymnasium.spaces import Dict
 
 
 def update_obs_space(env, delta):

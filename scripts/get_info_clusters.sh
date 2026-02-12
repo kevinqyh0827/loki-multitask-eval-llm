@@ -6,7 +6,7 @@ for i in $(seq 0 $((NUM_CLUSTERS-1))); do
   echo "=============================="
   PYTHONPATH=./ python vae/latent_cluster.py \
                 --gpu 0 \
-                --ckpt_dir VAE_500k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_epochs200 \
+                --ckpt_dir VAE_50k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_epochs200_20260209_215748 \
                 --n_clusters $NUM_CLUSTERS \
                 --cluster_label $i
 

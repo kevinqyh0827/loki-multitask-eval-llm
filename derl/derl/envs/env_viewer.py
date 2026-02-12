@@ -2,8 +2,8 @@ import time
 
 import glfw
 import numpy as np
-from gym.spaces import Box
-from gym.spaces import MultiDiscrete
+from gymnasium.spaces import Box
+from gymnasium.spaces import MultiDiscrete
 from mujoco_py import MjViewer
 from mujoco_py import const
 from mujoco_py import ignore_mujoco_warnings

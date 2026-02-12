@@ -1,6 +1,6 @@
 import os
 
-from gym.wrappers.monitoring import video_recorder
+from gymnasium.wrappers.monitoring import video_recorder
 
 from .vec_env import VecEnvWrapper
 

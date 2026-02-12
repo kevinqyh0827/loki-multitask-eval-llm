@@ -30,8 +30,13 @@ def get_files(_dir, reg_str, sort=False, sort_type=None):
 
 
 def save_json(data, path):
+    def _default(obj):
+        if hasattr(obj, 'item'):
+            return obj.item()
+        raise TypeError(f'Object of type {type(obj).__name__} is not JSON serializable')
+
     with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, default=_default)
 
 
 def load_json(path):

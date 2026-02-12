@@ -153,7 +153,7 @@ def train(args):
     
     optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
     
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.95, patience=10, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.95, patience=10)
 
     best_train_loss = float('inf')
 
@@ -493,7 +493,9 @@ def main():
     else:
         args.device = 'cpu'
     
-    args.ckpt_dir = f"VAE_500k_hdim{args.h_dim}_depth{args.d_depth}_LR_{args.lr}_WD_{args.wd}_L{args.n_layer}_H{args.n_head}_F{args.factor}_beta{args.max_beta}_bsize{args.batch_size}_epochs{args.epochs}"
+    from datetime import datetime
+    date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    args.ckpt_dir = f"VAE_50k_hdim{args.h_dim}_depth{args.d_depth}_LR_{args.lr}_WD_{args.wd}_L{args.n_layer}_H{args.n_head}_F{args.factor}_beta{args.max_beta}_bsize{args.batch_size}_epochs{args.epochs}_{date_str}"
     wandb.init(project="VAE", name=args.ckpt_dir)
 
     if args.save_latent:

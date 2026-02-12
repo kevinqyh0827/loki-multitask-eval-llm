@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import torch
 from torch.utils.data.sampler import BatchSampler
 from torch.utils.data.sampler import SubsetRandomSampler

@@ -7,3 +7,4 @@ log
 vae/*webdataset
 metamorph/output
 data/
+*.pyc

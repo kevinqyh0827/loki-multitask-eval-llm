@@ -1,8 +1,11 @@
 import os
 
-from gym.wrappers.monitoring import video_recorder
-
 from .vec_env import VecEnvWrapper
+
+try:
+    from gymnasium.wrappers.monitoring import video_recorder
+except ImportError:
+    video_recorder = None
 
 try:
     from mujoco_py import GlfwContext

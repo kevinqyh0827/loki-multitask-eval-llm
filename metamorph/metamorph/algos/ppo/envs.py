@@ -2,13 +2,57 @@ import time
 from collections import defaultdict
 from collections import deque
 
-import gym
+import gymnasium as gym
 import torch
 
+
+def _patch_gymnasium_for_old_api():
+    """Patch gymnasium base classes to support old gym API (4-tuple step, single obs reset).
+
+    This codebase was written for the old gym API. gymnasium 1.x changed step() to
+    return 5 values and reset() to return (obs, info). This patch makes the base
+    Wrapper/ObservationWrapper/ActionWrapper/RewardWrapper classes compatible with
+    the old API so all existing custom wrappers work unchanged.
+    """
+    def _wrapper_step(self, action):
+        return self.env.step(action)
+
+    def _wrapper_reset(self, **kwargs):
+        return self.env.reset(**kwargs)
+
+    def _obs_wrapper_step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        return self.observation(obs), rew, done, info
+
+    def _obs_wrapper_reset(self, **kwargs):
+        obs = self.env.reset(**kwargs)
+        return self.observation(obs)
+
+    def _action_wrapper_step(self, action):
+        return self.env.step(self.action(action))
+
+    def _reward_wrapper_step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        return obs, self.reward(rew), done, info
+
+    def _wrapper_getattr(self, name):
+        """Delegate attribute access to wrapped env (old gym behavior)."""
+        return getattr(self.env, name)
+
+    gym.Wrapper.step = _wrapper_step
+    gym.Wrapper.reset = _wrapper_reset
+    gym.Wrapper.__getattr__ = _wrapper_getattr
+    gym.ObservationWrapper.step = _obs_wrapper_step
+    gym.ObservationWrapper.reset = _obs_wrapper_reset
+    gym.ActionWrapper.step = _action_wrapper_step
+    gym.RewardWrapper.step = _reward_wrapper_step
+
+
+_patch_gymnasium_for_old_api()
+
 try:
-    import metamorph.envs  # Register envs
     from metamorph.config import cfg
-    from metamorph.envs import CUSTOM_ENVS
+    from metamorph.envs.tasks.task import make_env as create_task_env
     from metamorph.envs.vec_env.dummy_vec_env import DummyVecEnv
     from metamorph.envs.vec_env.pytorch_vec_env import VecPyTorch
     from metamorph.envs.vec_env.subproc_vec_env import SubprocVecEnv
@@ -17,30 +61,39 @@ try:
 except:
     import sys
     sys.path.append("..")
-    import metamorph.metamorph.envs  # Register envs
     from metamorph.metamorph.config import cfg
-    from metamorph.metamorph.envs import CUSTOM_ENVS
+    from metamorph.metamorph.envs.tasks.task import make_env as create_task_env
     from metamorph.metamorph.envs.vec_env.dummy_vec_env import DummyVecEnv
     from metamorph.metamorph.envs.vec_env.pytorch_vec_env import VecPyTorch
     from metamorph.metamorph.envs.vec_env.subproc_vec_env import SubprocVecEnv
     from metamorph.metamorph.envs.vec_env.vec_normalize import VecNormalize
     from metamorph.metamorph.envs.wrappers.multi_env_wrapper import MultiEnvWrapper
 
+# Map env IDs to max episode steps (matches the gymnasium registration)
+_ENV_MAX_STEPS = {
+    "Unimal-v0": 1000,
+    "Unimal-eval-v0": 200,
+}
+
+
+def _make_raw_env(xml_file=None, tmp_sample=False):
+    """Create raw task env without outer wrappers."""
+    return create_task_env(agent_name=xml_file, tmp_sample=tmp_sample)
+
+
+def _wrap_env(env, env_id):
+    """Add TimeLimit, TimeLimitMask, and RecordEpisodeStatistics wrappers."""
+    max_steps = _ENV_MAX_STEPS.get(env_id, 1000)
+    env = OldTimeLimit(env, max_episode_steps=max_steps)
+    env = TimeLimitMask(env)
+    env = RecordEpisodeStatistics(env)
+    return env
+
 
 def make_env(env_id, seed, rank, xml_file=None, tmp_sample=False):
     def _thunk():
-        if env_id in CUSTOM_ENVS:
-            env = gym.make(env_id, agent_name=xml_file, tmp_sample=tmp_sample)
-        else:
-            env = gym.make(env_id)
-        # Note this does not change the global seeds. It creates a numpy
-        # rng gen for env.
-        env.seed(seed + rank)
-        # Don't add wrappers above TimeLimit
-        if str(env.__class__.__name__).find("TimeLimit") >= 0:
-            env = TimeLimitMask(env)
-        # Store the un-normalized rewards
-        env = RecordEpisodeStatistics(env)
+        env = _make_raw_env(xml_file=xml_file, tmp_sample=tmp_sample)
+        env = _wrap_env(env, env_id)
         return env
 
     return _thunk
@@ -102,8 +155,11 @@ def make_vec_envs(
         xml_file = cfg.ENV.WALKERS[0]
         envs = []
         for idx in range(num_env):
-            _env = make_env(cfg.ENV_NAME, seed, idx, xml_file=xml_file)()
-            envs.append(env_func_wrapper(MultiEnvWrapper(_env, idx)))
+            # Create raw env, wrap with MultiEnvWrapper, then add outer wrappers
+            raw_env = _make_raw_env(xml_file=xml_file)
+            multi_env = MultiEnvWrapper(raw_env, idx)
+            wrapped_env = _wrap_env(multi_env, cfg.ENV_NAME)
+            envs.append(env_func_wrapper(wrapped_env))
 
     if save_video or render_policy:
         envs = DummyVecEnv([envs[0]])
@@ -188,13 +244,32 @@ def set_ob_rms(venv, ob_rms):
     vec_norm.ob_rms = ob_rms
 
 
-# Checks whether done was caused my timit limits or not
+class OldTimeLimit(gym.Wrapper):
+    """TimeLimit wrapper using old gym API (4-tuple step, single obs reset)."""
+    def __init__(self, env, max_episode_steps):
+        super().__init__(env)
+        self._max_episode_steps = max_episode_steps
+        self._elapsed_steps = 0
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        self._elapsed_steps += 1
+        if self._elapsed_steps >= self._max_episode_steps:
+            done = True
+            info["timeout"] = True
+        return obs, rew, done, info
+
+    def reset(self, **kwargs):
+        self._elapsed_steps = 0
+        return self.env.reset(**kwargs)
+
+
+# Checks whether done was caused by time limits or not
 class TimeLimitMask(gym.Wrapper):
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        if done and self.env._max_episode_steps == self.env._elapsed_steps:
+        if done and "timeout" in info:
             info["timeout"] = True
-
         return obs, rew, done, info
 
     def reset(self, **kwargs):
@@ -204,9 +279,7 @@ class TimeLimitMask(gym.Wrapper):
 class RecordEpisodeStatistics(gym.Wrapper):
     def __init__(self, env, deque_size=100):
         super(RecordEpisodeStatistics, self).__init__(env)
-        self.t0 = (
-            time.time()
-        )  # TODO: use perf_counter when gym removes Python 2 support
+        self.t0 = time.time()
         self.episode_return = 0.0
         # Stores individual components of the return. For e.g. return might
         # have separate reward for speed and standing.
@@ -216,15 +289,13 @@ class RecordEpisodeStatistics(gym.Wrapper):
         self.length_queue = deque(maxlen=deque_size)
 
     def reset(self, **kwargs):
-        observation = super(RecordEpisodeStatistics, self).reset(**kwargs)
+        observation = self.env.reset(**kwargs)
         self.episode_return = 0.0
         self.episode_length = 0
         return observation
 
     def step(self, action):
-        observation, reward, done, info = super(
-            RecordEpisodeStatistics, self
-        ).step(action)
+        observation, reward, done, info = self.env.step(action)
         self.episode_return += reward
         self.episode_length += 1
         for key, value in info.items():

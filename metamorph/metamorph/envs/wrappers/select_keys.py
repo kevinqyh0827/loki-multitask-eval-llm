@@ -1,9 +1,9 @@
 from collections import OrderedDict
 
-import gym
+import gymnasium as gym
 import numpy as np
-from gym.spaces import Box
-from gym.spaces import Dict
+from gymnasium.spaces import Box
+from gymnasium.spaces import Dict
 
 
 class SelectKeysWrapper(gym.ObservationWrapper):
