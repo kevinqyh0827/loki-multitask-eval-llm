@@ -47,6 +47,12 @@ class TransformerModel(nn.Module):
             self.pos_embedding = PositionalEncoding(self.d_model, seq_len)
         elif self.model_args.POS_EMBEDDING == "abs":
             self.pos_embedding = PositionalEncoding1D(self.d_model, self.seq_len)
+        elif self.model_args.POS_EMBEDDING in ("topo", "topo_path"):
+            topo_mode = "topo_depth" if self.model_args.POS_EMBEDDING == "topo" else "topo_path"
+            self.pos_embedding = TopologyPositionalEncoding(
+                self.d_model, cfg.MODEL.MAX_LIMBS, cfg.MODEL.MAX_JOINTS,
+                mode=topo_mode, dropout=self.model_args.DROPOUT,
+            )
 
         # Transformer Encoder
         encoder_layers = TransformerEncoderLayerResidual(
@@ -87,11 +93,11 @@ class TransformerModel(nn.Module):
         initrange = cfg.MODEL.TRANSFORMER.DECODER_INIT
         self.decoder[-1].weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, obs, obs_mask, obs_env, obs_cm_mask, return_attention=False):
+    def forward(self, obs, obs_mask, obs_env, obs_cm_mask, return_attention=False, edges=None):
         # (num_limbs, batch_size, limb_obs_size) -> (num_limbs, batch_size, d_model)
         obs_embed = self.limb_obs_embed(obs) * math.sqrt(self.d_model)
         # obs_embed = self.masking(obs_embed)
-        
+
         _, batch_size, _ = obs_embed.shape
 
         if "hfield" in cfg.ENV.KEYS_TO_KEEP:
@@ -106,6 +112,8 @@ class TransformerModel(nn.Module):
 
         if self.model_args.POS_EMBEDDING in ["learnt", "abs"]:
             obs_embed = self.pos_embedding(obs_embed)
+        elif self.model_args.POS_EMBEDDING in ["topo", "topo_path"]:
+            obs_embed = self.pos_embedding(obs_embed, edges)
         if return_attention:
             obs_embed_t, attention_maps = self.transformer_encoder.get_attention_maps(
                 obs_embed, src_key_padding_mask=obs_mask
@@ -166,6 +174,175 @@ class PositionalEncoding1D(nn.Module):
         return self.dropout(x)
 
 
+class TopologyPositionalEncoding(nn.Module):
+    """Topology-aware positional encoding derived from morphology tree structure.
+
+    Instead of encoding limb position by array index, this encodes each limb's
+    position in the morphology tree using the edges (parent-child pairs).
+
+    Modes:
+    - "topo_depth": learned embedding indexed by tree depth. Limbs at the same
+      depth get identical PE regardless of which branch they're on.
+    - "topo_path": per-depth-level embeddings summed along the root-to-limb path.
+      More expressive -- distinguishes limbs on different branches.
+    """
+
+    def __init__(self, d_model, max_limbs, max_joints, mode="topo_depth", dropout=0.1):
+        super().__init__()
+        self.d_model = d_model
+        self.max_limbs = max_limbs
+        self.max_joints = max_joints
+        self.mode = mode
+        self.dropout = nn.Dropout(p=dropout)
+
+        if mode == "topo_depth":
+            self.depth_embed = nn.Embedding(max_limbs, d_model)
+        elif mode == "topo_path":
+            self.path_embed = nn.ModuleList([
+                nn.Embedding(max_limbs, d_model) for _ in range(max_limbs)
+            ])
+
+    def _parse_edges(self, edges):
+        """Parse flat edges tensor into a parent map.
+
+        Args:
+            edges: (batch_size, 2 * max_joints) float tensor.
+                   Flattened [child_0, parent_0, child_1, parent_1, ...].
+                   Padded pairs use max_limbs - 1.
+        Returns:
+            parent: (batch_size, max_limbs) long tensor where parent[b][i] is
+                    the parent of limb i. Root and padded limbs map to themselves.
+        """
+        batch_size = edges.shape[0]
+        edges_int = edges.long()
+        edge_pairs = edges_int.view(batch_size, self.max_joints, 2)
+        children = edge_pairs[:, :, 0]  # (B, max_joints)
+        parents = edge_pairs[:, :, 1]   # (B, max_joints)
+
+        # Default: each limb is its own parent (self-loop for root + padding)
+        parent = torch.arange(self.max_limbs, device=edges.device) \
+                      .unsqueeze(0).expand(batch_size, -1).clone()
+
+        # Valid edges: not padding (padding value = max_limbs - 1)
+        pad_val = self.max_limbs - 1
+        valid = children != pad_val  # (B, max_joints)
+
+        for j in range(self.max_joints):
+            m = valid[:, j]
+            if m.any():
+                parent[m, children[m, j]] = parents[m, j]
+
+        return parent
+
+    def _compute_depths(self, parent):
+        """Compute tree depth of each limb via iterative parent lookup.
+
+        Args:
+            parent: (batch_size, max_limbs) long tensor
+        Returns:
+            depths: (batch_size, max_limbs) long tensor
+        """
+        batch_size = parent.shape[0]
+        device = parent.device
+        depths = torch.zeros(batch_size, self.max_limbs, dtype=torch.long, device=device)
+        arange = torch.arange(self.max_limbs, device=device).unsqueeze(0)
+        is_root = (parent == arange)  # (B, L) -- True for root and padded (self-loop)
+
+        # Iteratively propagate: depth[i] = depth[parent[i]] + 1, unless root
+        for _ in range(self.max_limbs):
+            parent_depths = depths.gather(1, parent)
+            depths = torch.where(is_root, torch.zeros_like(depths), parent_depths + 1)
+
+        return depths
+
+    def _compute_child_order(self, parent):
+        """Compute child order (sibling index) for each limb.
+
+        For each limb, its child_order is its index among its parent's children,
+        sorted by limb index. Since limbs are iterated in index order, the first
+        child of a parent gets order 0, the second gets order 1, etc.
+
+        Args:
+            parent: (batch_size, max_limbs) long tensor
+        Returns:
+            child_order: (batch_size, max_limbs) long tensor
+        """
+        batch_size = parent.shape[0]
+        device = parent.device
+        child_order = torch.zeros(batch_size, self.max_limbs, dtype=torch.long, device=device)
+
+        # For each limb i (in ascending order), count how many earlier limbs
+        # share the same parent. This gives the sibling index.
+        arange = torch.arange(self.max_limbs, device=device).unsqueeze(0)
+        is_root = (parent == arange)  # (B, L)
+
+        for i in range(1, self.max_limbs):
+            if is_root[:, i].all():
+                continue
+            # Count earlier siblings: limbs j < i with same parent
+            same_parent = (parent[:, :i] == parent[:, i:i+1])  # (B, i)
+            child_order[:, i] = same_parent.sum(dim=1)
+
+        return child_order
+
+    def forward(self, x, edges):
+        """Apply topology-aware positional encoding.
+
+        Args:
+            x: (seq_len, batch_size, d_model) -- limb embeddings
+            edges: (batch_size, 2 * max_joints) -- edge tensor from observations
+        Returns:
+            x: (seq_len, batch_size, d_model) -- with positional encoding added
+        """
+        parent = self._parse_edges(edges)  # (B, L)
+
+        if self.mode == "topo_depth":
+            depths = self._compute_depths(parent)  # (B, L)
+            pe = self.depth_embed(depths)  # (B, L, d_model)
+            pe = pe.permute(1, 0, 2)  # (L, B, d_model)
+            x = x + pe
+
+        elif self.mode == "topo_path":
+            depths = self._compute_depths(parent)  # (B, L)
+            child_order = self._compute_child_order(parent)  # (B, L)
+
+            batch_size = x.shape[1]
+            device = x.device
+
+            # Build ancestor chain: ancestors_stack[step, b, i] = ancestor of
+            # limb i at `step` hops up. Step 0 = self, step 1 = parent, etc.
+            ancestors = []
+            current = torch.arange(self.max_limbs, device=device) \
+                           .unsqueeze(0).expand(batch_size, -1).clone()
+            for _ in range(self.max_limbs):
+                ancestors.append(current.clone())
+                current = parent.gather(1, current)
+            ancestors_stack = torch.stack(ancestors, dim=0)  # (max_limbs, B, L)
+
+            # Precompute batch and limb index grids for advanced indexing
+            b_idx = torch.arange(batch_size, device=device).unsqueeze(1).expand(-1, self.max_limbs)
+            l_idx = torch.arange(self.max_limbs, device=device).unsqueeze(0).expand(batch_size, -1)
+
+            # For each path position p (0=root, ..., d=limb), look up the
+            # child_order of the ancestor at that level and embed it.
+            pe = torch.zeros_like(x)  # (L, B, d_model)
+            for p in range(self.max_limbs):
+                # For a limb at depth d, path position p uses ancestor at (d-p) hops
+                hops_up = (depths - p).clamp(min=0, max=self.max_limbs - 1)  # (B, L)
+                # Vectorized gather: ancestor index at that hop distance
+                anc_idx = ancestors_stack[hops_up, b_idx, l_idx]  # (B, L)
+                # Get child_order of that ancestor
+                anc_child_order = child_order.gather(1, anc_idx)  # (B, L)
+                emb = self.path_embed[p](anc_child_order)  # (B, L, d_model)
+                # Only add for path positions that exist (p <= depth)
+                valid = (p <= depths).unsqueeze(-1).float()  # (B, L, 1)
+                pe = pe + (emb * valid).permute(1, 0, 2)
+
+            x = x + pe
+
+        return self.dropout(x)
+
+
 class MLPObsEncoder(nn.Module):
     """Encoder for env obs like hfield."""
 
@@ -212,7 +389,7 @@ class ActorCritic(nn.Module):
             obs_cm_mask = obs["obs_padding_cm_mask"]
         else:
             obs_cm_mask = None
-        obs, obs_mask, act_mask, _ = (
+        obs, obs_mask, act_mask, edges = (
             obs["proprioceptive"],
             obs["obs_padding_mask"],
             obs["act_padding_mask"],
@@ -228,7 +405,7 @@ class ActorCritic(nn.Module):
         obs = obs.reshape(batch_size, self.seq_len, -1).permute(1, 0, 2)
         # Per limb critic values
         limb_vals, v_attention_maps = self.v_net(
-            obs, obs_mask, obs_env, obs_cm_mask, return_attention=return_attention
+            obs, obs_mask, obs_env, obs_cm_mask, return_attention=return_attention, edges=edges
         )
         # Zero out mask values
         limb_vals = limb_vals * (1 - obs_mask.int())
@@ -237,7 +414,7 @@ class ActorCritic(nn.Module):
         val = torch.divide(torch.sum(limb_vals, dim=1, keepdim=True), num_limbs)
 
         mu, mu_attention_maps = self.mu_net(
-            obs, obs_mask, obs_env, obs_cm_mask, return_attention=return_attention
+            obs, obs_mask, obs_env, obs_cm_mask, return_attention=return_attention, edges=edges
         )
         std = torch.exp(self.log_std)
         pi = Normal(mu, std)

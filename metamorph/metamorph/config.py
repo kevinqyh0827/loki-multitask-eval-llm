@@ -521,7 +521,7 @@ _C.MODEL.TRANSFORMER.EXT_HIDDEN_DIMS = []
 # Early vs late fusion of exterioceptive observation
 _C.MODEL.TRANSFORMER.EXT_MIX = "none"
 
-# Type of position embedding to use: None, learnt
+# Type of position embedding: "learnt", "abs", "topo" (depth), "topo_path" (full path)
 _C.MODEL.TRANSFORMER.POS_EMBEDDING = "learnt"
 
 # --------------------------------------------------------------------------- #

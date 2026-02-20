@@ -316,7 +316,7 @@ class LOKI:
 
     def train_on_batch(self, cur_iter):
         adv = self.buffer.ret - self.buffer.val
-        adv = (adv - adv.mean()) / (adv.std() + 1e-5) # shape: [PPO.TIMESTEPS, PPO.NUM_ENVS, 1]
+        adv = (adv - adv.mean()) / (adv.std() + 1e-5) # normalization, shape: [PPO.TIMESTEPS, PPO.NUM_ENVS, 1]
 
         for _ in range(cfg.PPO.EPOCHS):
             batch_sampler = self.buffer.get_sampler(adv)
