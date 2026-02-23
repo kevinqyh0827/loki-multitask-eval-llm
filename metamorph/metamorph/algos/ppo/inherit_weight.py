@@ -5,7 +5,7 @@ from metamorph.config import cfg
 
 def restore_from_checkpoint(ac):
     print("Loading pretrained actor critic model")
-    model_p, ob_rms = torch.load(cfg.PPO.CHECKPOINT_PATH)
+    model_p, ob_rms = torch.load(cfg.PPO.CHECKPOINT_PATH, weights_only=False)
 
     state_dict_c = ac.state_dict()
     state_dict_p = model_p.state_dict()
@@ -54,7 +54,7 @@ def restore_from_checkpoints_model_soup(ac):
     num_checkpoints = len(checkpoint_paths)
 
     for path in checkpoint_paths:
-        checkpoint, ob_rms = torch.load(path, map_location='cpu')
+        checkpoint, ob_rms = torch.load(path, map_location='cpu', weights_only=False)
         
         # Add the parameters to the accumulator
         for key in checkpoint.state_dict():

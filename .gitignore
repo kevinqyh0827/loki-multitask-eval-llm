@@ -8,3 +8,32 @@ vae/*webdataset
 metamorph/output
 data/
 *.pyc
+metamorph/MUJOCO_LOG.TXT
+
+# Python
+__pycache__/
+*.egg-info/
+.eggs/
+*.so
+
+# Model checkpoints and data
+*.npy
+*.pkl
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.onnx
+*.pb
+*.weights
+*.bin
+
+# Archives
+*.zip
+*.gz
+*.bz2
+*.xz
+*.7z
+
+# Environment
+.env

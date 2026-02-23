@@ -15,8 +15,8 @@ def uniform_placement(grid, obj_size, random_state):
     col_min = obj_size[0] + buffer_l
     idx = np.array(
         [
-            random_state.randint(row_min, row_max),
-            random_state.randint(col_min, col_max),
+            random_state.integers(row_min, row_max),
+            random_state.integers(col_min, col_max),
         ]
     )
     return idx
@@ -41,8 +41,8 @@ def close_placement(center, grid, obj_size, random_state):
 
     idx = np.array(
         [
-            random_state.randint(row_min, row_max),
-            random_state.randint(col_min, col_max),
+            random_state.integers(row_min, row_max),
+            random_state.integers(col_min, col_max),
         ]
     )
     return idx
@@ -55,7 +55,7 @@ def forward_placement(prev_pos, grid, obj_size, random_state):
     buffer_l = cfg.OBJECT.PLACEMENT_BUFFER_LEN * cfg.HFIELD.NUM_DIVS * 2
     buffer_w = cfg.OBJECT.PLACEMENT_BUFFER_WIDTH * cfg.HFIELD.NUM_DIVS * 2
     lo_dist, hi_dist = cfg.OBJECT.FORWARD_PLACEMENT_DIST
-    min_col_dist = random_state.randint(lo_dist, hi_dist) * cfg.HFIELD.NUM_DIVS
+    min_col_dist = random_state.integers(lo_dist, hi_dist) * cfg.HFIELD.NUM_DIVS
 
     # Keep 1 meter + obj half len padding from the wall
     row_max = nrow - obj_size[1] - buffer_w
@@ -64,7 +64,7 @@ def forward_placement(prev_pos, grid, obj_size, random_state):
     col_idx = min(col_c + min_col_dist, ncol - obj_size[0] - buffer_l)
 
     idx = np.array(
-        [random_state.randint(row_min, row_max), col_idx]
+        [random_state.integers(row_min, row_max), col_idx]
     )
     return idx
 

@@ -349,7 +349,7 @@ class Terrain:
         # agent is at edges
         padding = cfg.HFIELD.PADDING * self.divs
         self.add_padding(padding, cfg.HFIELD.GAP_DEPTH)
-        self.hfield = np.round_(self.hfield, 3)
+        self.hfield = np.round(self.hfield, 3)
 
         return xml_elems
 

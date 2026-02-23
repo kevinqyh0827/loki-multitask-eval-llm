@@ -193,8 +193,8 @@ class MultiUnimalNodeCentricObservation(gym.ObservationWrapper):
 
         dummy_obs["obs_padding_mask"] = dummy_padding_mask
         dummy_obs["act_padding_mask"] = dummy_act_padding_mask
-        if cfg.ENV.TYPE != "ft":
-            dummy_obs["hfield"] = np.zeros((1410,))
+        if "hfield" in self.observation_space.spaces:
+            dummy_obs["hfield"] = np.zeros(self.observation_space["hfield"].shape)
 
         return dummy_obs
 

@@ -137,11 +137,16 @@ def main():
     os.makedirs(cfg.OUT_DIR, exist_ok=True)
     cfg.ENV.WALKER_DIR = cfg.OUT_DIR
 
-    # initialize wandb
+    # initialize wandb (support resume via WANDB_RUN_ID env var)
+    wandb_kwargs = {}
+    wandb_run_id = os.environ.get("WANDB_RUN_ID")
+    if wandb_run_id:
+        wandb_kwargs["id"] = wandb_run_id
+        wandb_kwargs["resume"] = "allow"
     if cfg.LOKI.TRAIN:
-        wandb.init(project="LOKI", name=cfg.OUT_DIR)
+        wandb.init(project="LOKI", name=cfg.OUT_DIR, **wandb_kwargs)
     else:
-        wandb.init(project="LOKI-eval", name=cfg.OUT_DIR)
+        wandb.init(project="LOKI-eval", name=cfg.OUT_DIR, **wandb_kwargs)
     # Save the config
     dump_cfg()
     loki_train(args, train=cfg.LOKI.TRAIN)

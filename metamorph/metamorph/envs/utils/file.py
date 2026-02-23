@@ -30,7 +30,18 @@ def get_files(_dir, reg_str, sort=False, sort_type=None):
 
 
 def save_json(data, path):
+    from collections import deque
+    import numpy as np
+
     def _default(obj):
+        if isinstance(obj, deque):
+            return list(obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
         if hasattr(obj, 'item'):
             return obj.item()
         raise TypeError(f'Object of type {type(obj).__name__} is not JSON serializable')

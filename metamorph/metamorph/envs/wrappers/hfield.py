@@ -40,10 +40,15 @@ class HfieldObs1D(gym.ObservationWrapper):
         x_pos, y_pos, _ = self.unwrapped.sim.data.get_body_xpos("torso/0")
         _, col_idx = obs["hfield_idx"]
 
-        c_min = col_idx - behind
-        c_max = col_idx + front
+        c_min = max(0, col_idx - behind)
+        c_max = min(hfield.shape[1], col_idx + front)
+        col_idx = np.clip(col_idx, 0, hfield.shape[1] - 1)
 
         obs["hfield"] = hfield[0, c_min:c_max]
+        # Pad if slice was truncated at boundaries
+        expected_len = behind + front
+        if obs["hfield"].shape[0] < expected_len:
+            obs["hfield"] = np.pad(obs["hfield"], (0, expected_len - obs["hfield"].shape[0]))
 
         obs["hfield"] = obs["hfield"] - hfield[0, col_idx]
         obs["hfield"] = obs["hfield"].flatten()
@@ -97,6 +102,12 @@ class HfieldObs2D(gym.Wrapper):
         row_idx, col_idx = obs["hfield_idx"]
         mask_row = mask_row + row_idx
         mask_col = mask_col + col_idx
+
+        # Clip indices to valid hfield bounds
+        mask_row = np.clip(mask_row, 0, hfield.shape[0] - 1)
+        mask_col = np.clip(mask_col, 0, hfield.shape[1] - 1)
+        row_idx = np.clip(row_idx, 0, hfield.shape[0] - 1)
+        col_idx = np.clip(col_idx, 0, hfield.shape[1] - 1)
 
         corner_points = self._get_corner_points(mask_row, mask_col)
         self.metadata["corner_points"] = corner_points
@@ -222,8 +233,12 @@ class UnimalHeightObs(gym.ObservationWrapper):
             return obs
 
         row_idx, col_idx = obs["hfield_idx"]
+        hfield = self.metadata["hfield"]
+        # Clip indices to valid range to handle agents walking past terrain edge
+        row_idx = np.clip(row_idx, 0, hfield.shape[0] - 1)
+        col_idx = np.clip(col_idx, 0, hfield.shape[1] - 1)
         try:
-            terrain_z = self.metadata["hfield"][row_idx, col_idx]
+            terrain_z = hfield[row_idx, col_idx]
             # In case of gap terrain_z will be negative, clip at 0
             if cfg.ENV.TASK not in ["incline", "push_box_incline"]:
                 terrain_z = max(0, terrain_z)
