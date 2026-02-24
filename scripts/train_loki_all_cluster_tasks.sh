@@ -1,20 +1,22 @@
 #!/bin/bash
 # Resource-aware batch launcher for LOKI cluster-task training.
-# Monitors GPU memory and CPU load before launching new jobs.
+# Monitors GPU memory, system RAM, and CPU load before launching new jobs.
 # Skips already-completed runs (checks for Unimal-v0.pt).
 # Distributes jobs across multiple GPUs in round-robin fashion.
 # Properly tracks and cleans up child processes on exit.
 #
-# Usage: bash scripts/train_loki_all_cluster_tasks.sh [max_concurrent_jobs] [gpu_mem_threshold_mb] [num_gpus]
+# Usage: bash scripts/train_loki_all_cluster_tasks.sh [max_concurrent_jobs] [gpu_mem_threshold_mb] [num_gpus] [ram_threshold_mb]
 #
-# Example: bash scripts/train_loki_all_cluster_tasks.sh 2 10000 2
+# Example: bash scripts/train_loki_all_cluster_tasks.sh 2 10000 2 60000
 #   - Runs at most 2 concurrent jobs
 #   - Only launches a new job if >= 10000 MiB GPU memory is free
 #   - Distributes across 2 GPUs
+#   - Only launches a new job if >= 60000 MiB system RAM is free
 
 MAX_CONCURRENT=${1:-2}           # Max concurrent jobs (default: 2)
 GPU_MEM_THRESHOLD=${2:-10000}    # Min free GPU memory in MiB to launch (default: 10000)
 NUM_GPUS=${3:-2}                 # Number of GPUs available (default: 2)
+RAM_THRESHOLD=${4:-60000}        # Min free system RAM in MiB to launch (default: 60000)
 NEXT_GPU=0                       # Round-robin GPU assignment counter
 
 NUM_WALKER=20
@@ -25,7 +27,8 @@ TASKS=("locomotion" "obstacle" "incline")
 DROP_FREQ=2
 NUM_DROP=2
 
-# Track child PIDs for cleanup
+# Track child PIDs and their job descriptions for status display
+declare -A PID_TO_JOB     # Maps PID -> job description string
 CHILD_PIDS=()
 
 # Cleanup handler: kill all child processes on exit/signal
@@ -35,7 +38,7 @@ cleanup() {
     for pid in "${CHILD_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null
-            echo "  Killed PID $pid"
+            echo "  Killed PID $pid (${PID_TO_JOB[$pid]:-unknown})"
         fi
     done
     # Also kill any remaining train_loki.py processes in our process group
@@ -60,7 +63,13 @@ get_free_gpu_mem() {
     nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1 | tr -d ' '
 }
 
-# Count currently running training jobs from our tracked PIDs
+# Get available system RAM in MiB
+get_free_ram() {
+    free -m 2>/dev/null | awk '/^Mem:/ {print $7}'
+}
+
+# Count currently running training jobs and update PID list
+# Also prints status of running/waiting jobs when called with "verbose" argument
 count_running_jobs() {
     local count=0
     local alive_pids=()
@@ -68,10 +77,30 @@ count_running_jobs() {
         if kill -0 "$pid" 2>/dev/null; then
             count=$((count + 1))
             alive_pids+=("$pid")
+        else
+            # Job finished, clean up its entry
+            unset PID_TO_JOB[$pid]
         fi
     done
     CHILD_PIDS=("${alive_pids[@]}")
     echo $count
+}
+
+# Display status of all running and pending jobs
+print_job_status() {
+    local pending_job="$1"
+    echo "  ---- Job Status ----"
+    # Show running jobs
+    for pid in "${CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "  [RUNNING]  ${PID_TO_JOB[$pid]}  (PID=$pid)"
+        fi
+    done
+    # Show the pending job that's waiting
+    if [ -n "$pending_job" ]; then
+        echo "  [WAITING]  $pending_job"
+    fi
+    echo "  ---------------------"
 }
 
 # Check if a job is already completed
@@ -85,15 +114,25 @@ is_completed() {
 
 # Wait until resources are available
 wait_for_resources() {
+    local pending_job="$1"
+    local first_wait=true
     while true; do
         local running=$(count_running_jobs)
-        local free_mem=$(get_free_gpu_mem)
+        local free_gpu=$(get_free_gpu_mem)
+        local free_ram=$(get_free_ram)
 
-        if [ "$running" -lt "$MAX_CONCURRENT" ] && [ "$free_mem" -gt "$GPU_MEM_THRESHOLD" ]; then
+        if [ "$running" -lt "$MAX_CONCURRENT" ] && \
+           [ "$free_gpu" -gt "$GPU_MEM_THRESHOLD" ] && \
+           [ "$free_ram" -gt "$RAM_THRESHOLD" ]; then
             return 0
         fi
 
-        echo "  Waiting... (running=$running/$MAX_CONCURRENT, free_gpu=${free_mem}MiB/${GPU_MEM_THRESHOLD}MiB threshold)"
+        if [ "$first_wait" = true ]; then
+            print_job_status "$pending_job"
+            first_wait=false
+        fi
+
+        echo "  Waiting... (running=$running/$MAX_CONCURRENT, free_gpu=${free_gpu}MiB/${GPU_MEM_THRESHOLD}MiB, free_ram=${free_ram}MiB/${RAM_THRESHOLD}MiB)"
         sleep 60
     done
 }
@@ -105,6 +144,7 @@ echo "Clusters: 0-$((NUM_CLUSTERS-1))"
 echo "Max concurrent jobs: $MAX_CONCURRENT"
 echo "Num GPUs: $NUM_GPUS"
 echo "GPU memory threshold: ${GPU_MEM_THRESHOLD} MiB"
+echo "RAM threshold: ${RAM_THRESHOLD} MiB"
 echo ""
 
 TOTAL_JOBS=$((NUM_CLUSTERS * ${#TASKS[@]}))
@@ -122,14 +162,18 @@ for TASK in "${TASKS[@]}"; do
             continue
         fi
 
-        # Wait for resources
+        # Wait for resources (pass pending job name for status display)
         echo "[WAIT] $JOB_ID - checking resources..."
-        wait_for_resources
+        wait_for_resources "$JOB_ID"
 
         # Launch job on next GPU (round-robin)
-        echo "[LAUNCH] $JOB_ID on GPU $NEXT_GPU"
-        bash scripts/train_loki_task.sh $NUM_WALKER $NUM_CLUSTERS $CLUSTER_LABEL $RNG_SEED $TASK $NEXT_GPU
-        CHILD_PIDS+=($!)
+        # The & here backgrounds the subshell so $! correctly captures its PID
+        bash scripts/train_loki_task.sh $NUM_WALKER $NUM_CLUSTERS $CLUSTER_LABEL $RNG_SEED $TASK $NEXT_GPU &
+        local_pid=$!
+        CHILD_PIDS+=($local_pid)
+        PID_TO_JOB[$local_pid]="$JOB_ID (GPU=$NEXT_GPU)"
+
+        echo "[LAUNCH] $JOB_ID on GPU $NEXT_GPU (PID=$local_pid)"
         NEXT_GPU=$(( (NEXT_GPU + 1) % NUM_GPUS ))
         LAUNCHED=$((LAUNCHED + 1))
 

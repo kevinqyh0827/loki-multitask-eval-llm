@@ -2,7 +2,7 @@
 #SBATCH --job-name=loki-eval
 #SBATCH --partition=work1
 #SBATCH --gres=gpu:a100:2
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=48
 #SBATCH --mem=256G
 #SBATCH --time=3-00:00:00
 #SBATCH --output=log/slurm/loki-eval-%j.out
@@ -36,8 +36,8 @@ echo ""
 nvidia-smi
 echo ""
 
-# Run the batch launcher: 2 concurrent jobs, 10GB memory threshold, 2 GPUs
-bash scripts/train_loki_all_cluster_tasks.sh 2 10000 2
+# Run the batch launcher: 2 concurrent jobs, 10GB GPU memory threshold, 2 GPUs, 60GB RAM threshold
+bash scripts/train_loki_all_cluster_tasks.sh 2 10000 2 60000
 
 echo ""
 echo "End time: $(date)"

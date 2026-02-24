@@ -54,6 +54,8 @@ CKPT_PATH="./output/loki/$ENV_TYPE/kmeans_cluster/$NUM_CLUSTERS/$CLUSTER_LABEL/w
 VAE_PATH="VAE_50k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_epochs200_20260209_215748"
 
 cd metamorph
+# Note: runs in foreground here; the parent script (train_loki_all_cluster_tasks.sh)
+# backgrounds this script so it can properly track the PID for resource scheduling.
 CUDA_VISIBLE_DEVICES=$GPU_ID PYTHONPATH=./ python tools/train_loki.py \
                         --cfg $CFG_FILE \
                         --vae_path $VAE_PATH \
@@ -71,6 +73,4 @@ CUDA_VISIBLE_DEVICES=$GPU_ID PYTHONPATH=./ python tools/train_loki.py \
                         LOKI.SAMPLE_SIZE $NUM_SAMPLE \
                         LOKI.MUTATE_SAMPLE False \
                         ENV.TYPE "$ENV_TYPE" \
-                        RNG_SEED $RNG_SEED > ../$LOG_FILE 2>&1 &
-
-echo "Launched: task=$TASK_NAME cluster=$CLUSTER_LABEL (PID=$!) -> log: $LOG_FILE"
+                        RNG_SEED $RNG_SEED > ../$LOG_FILE 2>&1
