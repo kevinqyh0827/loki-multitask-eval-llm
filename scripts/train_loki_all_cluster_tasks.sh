@@ -18,7 +18,7 @@
 
 NUM_GPUS=${1:-2}                 # Number of GPUs available (default: 2)
 STABILIZE_TIME=${2:-300}         # Seconds to wait after launch for resource stabilization (default: 5 min)
-SAFETY_MARGIN=80                 # Use only 80% of measured capacity (reserve 20% for eval bursts)
+SAFETY_MARGIN=90                 # Use only 90% of measured capacity (reserve 20% for eval bursts)
 
 NUM_WALKER=20
 NUM_CLUSTERS=20
@@ -197,7 +197,7 @@ launch_next_job() {
     return 0
 }
 
-# Measure per-job resource consumption after stabilization
+# Measure per-job resource consumption after stabilization (called once during profiling)
 measure_per_job_usage() {
     local running=$(count_running_jobs)
     if [ "$running" -eq 0 ]; then
@@ -215,8 +215,15 @@ measure_per_job_usage() {
 
     GPU_PER_JOB=$((used_gpu / running))
     RAM_PER_JOB=$((used_ram / running))
+}
 
-    # Apply safety margin: calculate max concurrent using only SAFETY_MARGIN% of total resources
+# Dynamically calculate how many concurrent jobs can fit based on current resources.
+# Called every scheduling iteration so MAX_CONCURRENT adapts as jobs start/finish.
+calculate_max_concurrent() {
+    local total_gpu=$(get_total_gpu_mem)
+    local total_ram=$(get_total_ram)
+
+    # Apply safety margin: only use SAFETY_MARGIN% of total resources
     local safe_gpu=$(( total_gpu * SAFETY_MARGIN / 100 ))
     local safe_ram=$(( total_ram * SAFETY_MARGIN / 100 ))
 
@@ -310,6 +317,7 @@ done
 local_running=$(count_running_jobs)
 if [ "$local_running" -gt 0 ]; then
     measure_per_job_usage
+    calculate_max_concurrent
     echo ""
     echo "[PROFILING] Measurement complete:"
     echo "  Running jobs: $local_running"
@@ -333,6 +341,15 @@ while true; do
     # Exit when no running jobs and no pending jobs
     if [ "$running" -eq 0 ] && [ "$pending_left" -eq 0 ]; then
         break
+    fi
+
+    # Recalculate max concurrent based on current resources
+    if [ "$GPU_PER_JOB" -gt 0 ]; then
+        old_max=$MAX_CONCURRENT
+        calculate_max_concurrent
+        if [ "$MAX_CONCURRENT" -ne "$old_max" ]; then
+            echo "[SCHEDULER] Max concurrent updated: $old_max -> $MAX_CONCURRENT"
+        fi
     fi
 
     # Try to launch more jobs if slots available
