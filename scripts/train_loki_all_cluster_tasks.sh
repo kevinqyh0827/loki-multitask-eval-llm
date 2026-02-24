@@ -18,7 +18,7 @@
 
 NUM_GPUS=${1:-2}                 # Number of GPUs available (default: 2)
 STABILIZE_TIME=${2:-300}         # Seconds to wait after launch for resource stabilization (default: 5 min)
-SAFETY_MARGIN=90                 # Use only 90% of measured capacity (reserve 20% for eval bursts)
+SAFETY_MARGIN=90                 # Use only 90% of measured capacity (reserve 10% for eval bursts)
 
 NUM_WALKER=20
 NUM_CLUSTERS=20
