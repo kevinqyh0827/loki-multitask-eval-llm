@@ -119,6 +119,7 @@ def make_vec_envs(
     seed=None,
     video_idx=0,
     sampled_ids=[],
+    force_dummy=False,
 ):
     if not num_env:
         num_env = cfg.PPO.NUM_ENVS
@@ -163,7 +164,7 @@ def make_vec_envs(
 
     if save_video or render_policy:
         envs = DummyVecEnv([envs[0]])
-    elif cfg.VECENV.TYPE == "DummyVecEnv":
+    elif force_dummy or cfg.VECENV.TYPE == "DummyVecEnv":
         envs = DummyVecEnv(envs)
     elif cfg.VECENV.TYPE == "SubprocVecEnv":
         envs = SubprocVecEnv(envs, in_series=cfg.VECENV.IN_SERIES, context="fork")
