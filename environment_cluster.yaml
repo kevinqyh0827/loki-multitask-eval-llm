@@ -1,7 +1,5 @@
 name: loki
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
   - defaults
 dependencies:
@@ -11,14 +9,12 @@ dependencies:
   - conda-forge::mesalib
   - conda-forge::libgl
   - patchelf
-  # PyTorch + CUDA — choose ONE of the following pytorch-cuda lines:
-  #   For cluster CUDA 12.3: use pytorch-cuda=12.4 (backward compatible)
-  #   For cluster CUDA 11.8: use pytorch-cuda=11.8
-  - pytorch::pytorch=2.9.*
-  - pytorch::torchvision=0.24.*
-  - pytorch::torchaudio=2.9.*
-  - pytorch::pytorch-cuda=12.4
-  # All other Python packages via pip
+  # All Python packages via pip
   - pip
   - pip:
     - -r requirements.txt
+  # NOTE: PyTorch must be installed separately via pip after env creation:
+  #   For CUDA 12.3:
+  #     pip install torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu124
+  #   For CUDA 11.8:
+  #     pip install torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu118
