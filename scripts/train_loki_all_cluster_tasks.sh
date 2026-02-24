@@ -1,23 +1,24 @@
 #!/bin/bash
-# Resource-aware batch launcher for LOKI cluster-task training.
-# Monitors GPU memory, system RAM, and CPU load before launching new jobs.
+# Profiling-based adaptive batch launcher for LOKI cluster-task training.
+#
+# Instead of fixed thresholds, this script:
+#   1. Launches an initial batch of jobs (one per GPU)
+#   2. Waits for them to stabilize (~5 min) and measures per-job resource usage
+#   3. Auto-calculates how many concurrent jobs the node can handle
+#   4. Schedules remaining jobs with proper stabilization gaps
+#
 # Skips already-completed runs (checks for Unimal-v0.pt).
-# Distributes jobs across multiple GPUs in round-robin fashion.
-# Properly tracks and cleans up child processes on exit.
+# Distributes jobs across GPUs in round-robin fashion.
+# Displays running/queued job status during waits.
 #
-# Usage: bash scripts/train_loki_all_cluster_tasks.sh [max_concurrent_jobs] [gpu_mem_threshold_mb] [num_gpus] [ram_threshold_mb]
+# Usage: bash scripts/train_loki_all_cluster_tasks.sh [num_gpus] [stabilize_seconds]
 #
-# Example: bash scripts/train_loki_all_cluster_tasks.sh 2 10000 2 60000
-#   - Runs at most 2 concurrent jobs
-#   - Only launches a new job if >= 10000 MiB GPU memory is free
-#   - Distributes across 2 GPUs
-#   - Only launches a new job if >= 60000 MiB system RAM is free
+# Example: bash scripts/train_loki_all_cluster_tasks.sh 2 300
+#   - Uses 2 GPUs, waits 300s (5 min) between launches for stabilization
 
-MAX_CONCURRENT=${1:-2}           # Max concurrent jobs (default: 2)
-GPU_MEM_THRESHOLD=${2:-10000}    # Min free GPU memory in MiB to launch (default: 10000)
-NUM_GPUS=${3:-2}                 # Number of GPUs available (default: 2)
-RAM_THRESHOLD=${4:-60000}        # Min free system RAM in MiB to launch (default: 60000)
-NEXT_GPU=0                       # Round-robin GPU assignment counter
+NUM_GPUS=${1:-2}                 # Number of GPUs available (default: 2)
+STABILIZE_TIME=${2:-300}         # Seconds to wait after launch for resource stabilization (default: 5 min)
+SAFETY_MARGIN=80                 # Use only 80% of measured capacity (reserve 20% for eval bursts)
 
 NUM_WALKER=20
 NUM_CLUSTERS=20
@@ -27,11 +28,30 @@ TASKS=("locomotion" "obstacle" "incline")
 DROP_FREQ=2
 NUM_DROP=2
 
-# Track child PIDs and their job descriptions for status display
-declare -A PID_TO_JOB     # Maps PID -> job description string
+# Scheduling state (set during profiling phase)
+GPU_PER_JOB=0
+RAM_PER_JOB=0
+MAX_CONCURRENT=0
+NEXT_GPU=0
+
+# Track child PIDs, job descriptions, and start times
+declare -A PID_TO_JOB       # PID -> "task=X cluster=Y (GPU=Z)"
+declare -A PID_TO_START     # PID -> epoch seconds at launch
 CHILD_PIDS=()
 
-# Cleanup handler: kill all child processes on exit/signal
+# Job queue: arrays of task/cluster pairs to run
+QUEUE_TASKS=()
+QUEUE_CLUSTERS=()
+QUEUE_IDX=0
+
+# Counters
+TOTAL_JOBS=0
+SKIPPED=0
+COMPLETED=0
+LAUNCHED=0
+
+# --- Utility functions ---
+
 cleanup() {
     echo ""
     echo "[CLEANUP] Received signal, killing all child processes..."
@@ -41,7 +61,6 @@ cleanup() {
             echo "  Killed PID $pid (${PID_TO_JOB[$pid]:-unknown})"
         fi
     done
-    # Also kill any remaining train_loki.py processes in our process group
     pkill -P $$ 2>/dev/null
     wait 2>/dev/null
     echo "[CLEANUP] Done."
@@ -50,7 +69,6 @@ cleanup() {
 
 trap cleanup SIGTERM SIGINT SIGHUP EXIT
 
-# Map task to env_type for output path matching
 get_env_type() {
     case "$1" in
         locomotion) echo "ft" ;;
@@ -58,52 +76,6 @@ get_env_type() {
     esac
 }
 
-# Get minimum free GPU memory across all GPUs in MiB
-get_free_gpu_mem() {
-    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1 | tr -d ' '
-}
-
-# Get available system RAM in MiB
-get_free_ram() {
-    free -m 2>/dev/null | awk '/^Mem:/ {print $7}'
-}
-
-# Count currently running training jobs and update PID list
-# Also prints status of running/waiting jobs when called with "verbose" argument
-count_running_jobs() {
-    local count=0
-    local alive_pids=()
-    for pid in "${CHILD_PIDS[@]}"; do
-        if kill -0 "$pid" 2>/dev/null; then
-            count=$((count + 1))
-            alive_pids+=("$pid")
-        else
-            # Job finished, clean up its entry
-            unset PID_TO_JOB[$pid]
-        fi
-    done
-    CHILD_PIDS=("${alive_pids[@]}")
-    echo $count
-}
-
-# Display status of all running and pending jobs
-print_job_status() {
-    local pending_job="$1"
-    echo "  ---- Job Status ----"
-    # Show running jobs
-    for pid in "${CHILD_PIDS[@]}"; do
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "  [RUNNING]  ${PID_TO_JOB[$pid]}  (PID=$pid)"
-        fi
-    done
-    # Show the pending job that's waiting
-    if [ -n "$pending_job" ]; then
-        echo "  [WAITING]  $pending_job"
-    fi
-    echo "  ---------------------"
-}
-
-# Check if a job is already completed
 is_completed() {
     local task=$1
     local cluster=$2
@@ -112,91 +84,282 @@ is_completed() {
     [ -f "$ckpt" ]
 }
 
-# Wait until resources are available
-wait_for_resources() {
-    local pending_job="$1"
-    local first_wait=true
-    while true; do
-        local running=$(count_running_jobs)
-        local free_gpu=$(get_free_gpu_mem)
-        local free_ram=$(get_free_ram)
-
-        if [ "$running" -lt "$MAX_CONCURRENT" ] && \
-           [ "$free_gpu" -gt "$GPU_MEM_THRESHOLD" ] && \
-           [ "$free_ram" -gt "$RAM_THRESHOLD" ]; then
-            return 0
-        fi
-
-        if [ "$first_wait" = true ]; then
-            print_job_status "$pending_job"
-            first_wait=false
-        fi
-
-        echo "  Waiting... (running=$running/$MAX_CONCURRENT, free_gpu=${free_gpu}MiB/${GPU_MEM_THRESHOLD}MiB, free_ram=${free_ram}MiB/${RAM_THRESHOLD}MiB)"
-        sleep 60
-    done
+# Get minimum free GPU memory across all GPUs in MiB
+get_free_gpu_mem() {
+    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1 | tr -d ' '
 }
 
-# --- Main ---
-echo "=== LOKI Cluster-Task Batch Launcher ==="
-echo "Tasks: ${TASKS[*]}"
-echo "Clusters: 0-$((NUM_CLUSTERS-1))"
-echo "Max concurrent jobs: $MAX_CONCURRENT"
+# Get total GPU memory (sum across all GPUs) in MiB
+get_total_gpu_mem() {
+    nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk '{s+=$1} END {print s}'
+}
+
+# Get available system RAM in MiB
+get_free_ram() {
+    free -m 2>/dev/null | awk '/^Mem:/ {print $7}'
+}
+
+# Get total system RAM in MiB
+get_total_ram() {
+    free -m 2>/dev/null | awk '/^Mem:/ {print $2}'
+}
+
+# Count running jobs and prune dead PIDs
+count_running_jobs() {
+    local count=0
+    local alive_pids=()
+    for pid in "${CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            count=$((count + 1))
+            alive_pids+=("$pid")
+        else
+            unset PID_TO_JOB[$pid]
+            unset PID_TO_START[$pid]
+            COMPLETED=$((COMPLETED + 1))
+        fi
+    done
+    CHILD_PIDS=("${alive_pids[@]}")
+    echo $count
+}
+
+# Format elapsed time as "Xh Ym"
+format_elapsed() {
+    local seconds=$1
+    local hours=$((seconds / 3600))
+    local minutes=$(( (seconds % 3600) / 60 ))
+    if [ "$hours" -gt 0 ]; then
+        echo "${hours}h ${minutes}m"
+    else
+        echo "${minutes}m"
+    fi
+}
+
+# Display comprehensive job status
+print_status() {
+    local running=$(count_running_jobs)
+    local queued=$(( ${#QUEUE_TASKS[@]} - QUEUE_IDX ))
+    local now=$(date +%s)
+
+    echo ""
+    echo "=== Job Status (${running} running / ${queued} queued / ${COMPLETED} completed / ${SKIPPED} skipped) ==="
+
+    # Show running jobs
+    for pid in "${CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            local elapsed=$(( now - ${PID_TO_START[$pid]} ))
+            echo "  [RUNNING]  ${PID_TO_JOB[$pid]}  PID=$pid  ($(format_elapsed $elapsed))"
+        fi
+    done
+
+    # Show next queued job
+    if [ "$QUEUE_IDX" -lt "${#QUEUE_TASKS[@]}" ]; then
+        echo "  [QUEUED]   task=${QUEUE_TASKS[$QUEUE_IDX]} cluster=${QUEUE_CLUSTERS[$QUEUE_IDX]}  (next)"
+    fi
+
+    # Show resource usage
+    local free_gpu=$(get_free_gpu_mem)
+    local total_gpu=$(get_total_gpu_mem)
+    local free_ram=$(get_free_ram)
+    local total_ram=$(get_total_ram)
+    local used_gpu=$((total_gpu - free_gpu))
+    local used_ram=$((total_ram - free_ram))
+
+    echo "  Resources: GPU ${used_gpu}/${total_gpu} MiB used | RAM ${used_ram}/${total_ram} MiB used"
+    if [ "$GPU_PER_JOB" -gt 0 ]; then
+        echo "  Per-job: ~${GPU_PER_JOB} MiB GPU, ~${RAM_PER_JOB} MiB RAM | Max concurrent: $MAX_CONCURRENT"
+    fi
+    echo "================================================================"
+    echo ""
+}
+
+# Launch the next job from the queue
+launch_next_job() {
+    if [ "$QUEUE_IDX" -ge "${#QUEUE_TASKS[@]}" ]; then
+        return 1  # No more jobs
+    fi
+
+    local task="${QUEUE_TASKS[$QUEUE_IDX]}"
+    local cluster="${QUEUE_CLUSTERS[$QUEUE_IDX]}"
+    QUEUE_IDX=$((QUEUE_IDX + 1))
+
+    local job_desc="task=${task} cluster=${cluster} (GPU=$NEXT_GPU)"
+
+    bash scripts/train_loki_task.sh $NUM_WALKER $NUM_CLUSTERS $cluster $RNG_SEED $task $NEXT_GPU &
+    local pid=$!
+    CHILD_PIDS+=($pid)
+    PID_TO_JOB[$pid]="$job_desc"
+    PID_TO_START[$pid]=$(date +%s)
+
+    echo "[LAUNCH] $job_desc (PID=$pid)"
+    NEXT_GPU=$(( (NEXT_GPU + 1) % NUM_GPUS ))
+    LAUNCHED=$((LAUNCHED + 1))
+
+    return 0
+}
+
+# Measure per-job resource consumption after stabilization
+measure_per_job_usage() {
+    local running=$(count_running_jobs)
+    if [ "$running" -eq 0 ]; then
+        echo "[ERROR] No running jobs to measure. Aborting."
+        exit 1
+    fi
+
+    local total_gpu=$(get_total_gpu_mem)
+    local free_gpu=$(get_free_gpu_mem)
+    local total_ram=$(get_total_ram)
+    local free_ram=$(get_free_ram)
+
+    local used_gpu=$((total_gpu - free_gpu))
+    local used_ram=$((total_ram - free_ram))
+
+    GPU_PER_JOB=$((used_gpu / running))
+    RAM_PER_JOB=$((used_ram / running))
+
+    # Apply safety margin: calculate max concurrent using only SAFETY_MARGIN% of total resources
+    local safe_gpu=$(( total_gpu * SAFETY_MARGIN / 100 ))
+    local safe_ram=$(( total_ram * SAFETY_MARGIN / 100 ))
+
+    local max_by_gpu=$((safe_gpu / GPU_PER_JOB))
+    local max_by_ram=$((safe_ram / RAM_PER_JOB))
+
+    # Take the minimum of GPU and RAM limits, but at least 1
+    if [ "$max_by_gpu" -lt "$max_by_ram" ]; then
+        MAX_CONCURRENT=$max_by_gpu
+    else
+        MAX_CONCURRENT=$max_by_ram
+    fi
+    if [ "$MAX_CONCURRENT" -lt 1 ]; then
+        MAX_CONCURRENT=1
+    fi
+}
+
+# --- Build job queue ---
+
+echo "=== LOKI Cluster-Task Adaptive Batch Launcher ==="
 echo "Num GPUs: $NUM_GPUS"
-echo "GPU memory threshold: ${GPU_MEM_THRESHOLD} MiB"
-echo "RAM threshold: ${RAM_THRESHOLD} MiB"
+echo "Stabilization time: ${STABILIZE_TIME}s"
+echo "Safety margin: ${SAFETY_MARGIN}%"
 echo ""
 
-TOTAL_JOBS=$((NUM_CLUSTERS * ${#TASKS[@]}))
-SKIPPED=0
-LAUNCHED=0
-
+# Build queue of pending jobs (skip completed ones)
 for TASK in "${TASKS[@]}"; do
     for CLUSTER_LABEL in $(seq 0 $((NUM_CLUSTERS-1))); do
-        JOB_ID="task=${TASK} cluster=${CLUSTER_LABEL}"
-
-        # Skip if already completed
+        TOTAL_JOBS=$((TOTAL_JOBS + 1))
         if is_completed "$TASK" "$CLUSTER_LABEL"; then
-            echo "[SKIP] $JOB_ID (already completed)"
+            echo "[SKIP] task=${TASK} cluster=${CLUSTER_LABEL} (already completed)"
             SKIPPED=$((SKIPPED + 1))
             continue
         fi
-
-        # Wait for resources (pass pending job name for status display)
-        echo "[WAIT] $JOB_ID - checking resources..."
-        wait_for_resources "$JOB_ID"
-
-        # Launch job on next GPU (round-robin)
-        # The & here backgrounds the subshell so $! correctly captures its PID
-        bash scripts/train_loki_task.sh $NUM_WALKER $NUM_CLUSTERS $CLUSTER_LABEL $RNG_SEED $TASK $NEXT_GPU &
-        local_pid=$!
-        CHILD_PIDS+=($local_pid)
-        PID_TO_JOB[$local_pid]="$JOB_ID (GPU=$NEXT_GPU)"
-
-        echo "[LAUNCH] $JOB_ID on GPU $NEXT_GPU (PID=$local_pid)"
-        NEXT_GPU=$(( (NEXT_GPU + 1) % NUM_GPUS ))
-        LAUNCHED=$((LAUNCHED + 1))
-
-        # Brief pause to let the process start and allocate GPU memory
-        sleep 10
+        QUEUE_TASKS+=("$TASK")
+        QUEUE_CLUSTERS+=("$CLUSTER_LABEL")
     done
 done
 
+PENDING=${#QUEUE_TASKS[@]}
 echo ""
-echo "=== Batch launcher: all jobs submitted ==="
-echo "Total jobs: $TOTAL_JOBS"
-echo "Skipped (already done): $SKIPPED"
-echo "Launched: $LAUNCHED"
-echo ""
-echo "Waiting for remaining jobs to finish..."
+echo "Total: $TOTAL_JOBS | Already completed: $SKIPPED | To run: $PENDING"
 
-# Wait for all tracked children
-for pid in "${CHILD_PIDS[@]}"; do
-    if kill -0 "$pid" 2>/dev/null; then
-        wait "$pid" 2>/dev/null
-    fi
+if [ "$PENDING" -eq 0 ]; then
+    echo "All jobs already completed!"
+    trap - EXIT
+    exit 0
+fi
+
+# --- Phase 1: Profiling ---
+
+echo ""
+echo "=== Phase 1: Profiling (launching initial batch) ==="
+
+# Launch one job per GPU as initial batch
+INITIAL_BATCH=$NUM_GPUS
+if [ "$INITIAL_BATCH" -gt "$PENDING" ]; then
+    INITIAL_BATCH=$PENDING
+fi
+
+for i in $(seq 1 $INITIAL_BATCH); do
+    launch_next_job
 done
 
-# Disable cleanup trap on normal exit
-trap - EXIT
+echo ""
+echo "[PROFILING] Waiting ${STABILIZE_TIME}s for jobs to fully initialize and allocate resources..."
+echo "[PROFILING] (This ensures accurate resource measurement)"
+
+# Wait for stabilization, showing countdown every 60s
+elapsed=0
+while [ "$elapsed" -lt "$STABILIZE_TIME" ]; do
+    sleep_chunk=60
+    remaining=$((STABILIZE_TIME - elapsed))
+    if [ "$sleep_chunk" -gt "$remaining" ]; then
+        sleep_chunk=$remaining
+    fi
+    sleep $sleep_chunk
+    elapsed=$((elapsed + sleep_chunk))
+
+    # Check if initial jobs are still alive
+    local_running=$(count_running_jobs)
+    if [ "$local_running" -eq 0 ]; then
+        echo "[WARNING] All initial jobs exited during profiling. Check logs for errors."
+        echo "Attempting to continue with remaining jobs..."
+        break
+    fi
+    echo "  Stabilizing... ${elapsed}/${STABILIZE_TIME}s (${local_running} jobs running)"
+done
+
+# Measure resource usage
+local_running=$(count_running_jobs)
+if [ "$local_running" -gt 0 ]; then
+    measure_per_job_usage
+    echo ""
+    echo "[PROFILING] Measurement complete:"
+    echo "  Running jobs: $local_running"
+    echo "  GPU per job: ~${GPU_PER_JOB} MiB"
+    echo "  RAM per job: ~${RAM_PER_JOB} MiB"
+    echo "  Max concurrent (with ${SAFETY_MARGIN}% safety margin): $MAX_CONCURRENT"
+else
+    echo "[WARNING] No jobs running after profiling. Setting MAX_CONCURRENT=1"
+    MAX_CONCURRENT=1
+fi
+
+# --- Phase 2: Steady-state scheduling ---
+
+echo ""
+echo "=== Phase 2: Steady-state scheduling ==="
+
+while true; do
+    running=$(count_running_jobs)
+    pending_left=$(( ${#QUEUE_TASKS[@]} - QUEUE_IDX ))
+
+    # Exit when no running jobs and no pending jobs
+    if [ "$running" -eq 0 ] && [ "$pending_left" -eq 0 ]; then
+        break
+    fi
+
+    # Try to launch more jobs if slots available
+    if [ "$pending_left" -gt 0 ] && [ "$running" -lt "$MAX_CONCURRENT" ]; then
+        free_gpu=$(get_free_gpu_mem)
+        free_ram=$(get_free_ram)
+
+        if [ "$free_gpu" -gt "$GPU_PER_JOB" ] && [ "$free_ram" -gt "$RAM_PER_JOB" ]; then
+            launch_next_job
+            print_status
+
+            # Wait for the new job to stabilize before considering launching another
+            echo "[STABILIZE] Waiting ${STABILIZE_TIME}s for new job to allocate resources..."
+            sleep $STABILIZE_TIME
+            continue
+        fi
+    fi
+
+    # Nothing to launch right now, show status and wait
+    print_status
+    sleep 60
+done
+
+# --- Done ---
+
+echo ""
 echo "=== All jobs completed ==="
+echo "Total: $TOTAL_JOBS | Completed: $COMPLETED | Skipped: $SKIPPED | Launched: $LAUNCHED"
+
+trap - EXIT

@@ -66,6 +66,9 @@ def get_hparams():
 def cleanup_tensorboard():
     tb_dir = os.path.join(cfg.OUT_DIR, "tensorboard")
 
+    if not os.path.isdir(tb_dir):
+        return
+
     # Assume there is only one sub_dir and break when it's found
     for content in os.listdir(tb_dir):
         content = os.path.join(tb_dir, content)

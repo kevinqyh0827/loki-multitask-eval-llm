@@ -36,8 +36,9 @@ echo ""
 nvidia-smi
 echo ""
 
-# Run the batch launcher: 2 concurrent jobs, 10GB GPU memory threshold, 2 GPUs, 60GB RAM threshold
-bash scripts/train_loki_all_cluster_tasks.sh 2 10000 2 60000
+# Run the adaptive batch launcher: 2 GPUs, 5 min (300s) stabilization between launches
+# The script auto-discovers how many concurrent jobs fit based on measured resource usage
+bash scripts/train_loki_all_cluster_tasks.sh 2 300
 
 echo ""
 echo "End time: $(date)"
