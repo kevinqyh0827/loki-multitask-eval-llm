@@ -81,7 +81,8 @@ def get_ancestor_from_xml(path):
 
 def get_metric_in_parallel(paths, metric_name):
     """Get similarity metric for a list of unimals."""
-    p = Pool()
+    num_workers = min(4, len(paths), multiprocessing.cpu_count())
+    p = Pool(num_workers)
     if metric_name == "point_cloud":
         data = p.map(point_cloud_from_xml, paths)
     elif metric_name == "geom_orientation":
