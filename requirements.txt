@@ -1,0 +1,31 @@
+# Core ML/simulation
+mujoco==3.4.0
+gymnasium==1.2.2
+shimmy==2.0.0
+numpy>=2.3
+scipy>=1.16
+
+# Rendering
+glfw==2.10.0
+PyOpenGL==3.1.10
+imageio>=2.37
+xvfbwrapper==0.2.16
+
+# Data & training
+webdataset==1.0.2
+wandb>=0.23
+scikit-learn>=1.7
+
+# Visualization
+matplotlib>=3.10
+seaborn
+graphviz
+
+# XML parsing
+lxml>=6.0
+
+# Utilities
+cloudpickle
+PyYAML
+click
+filelock
