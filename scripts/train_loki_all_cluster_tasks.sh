@@ -2,16 +2,20 @@
 # Resource-aware batch launcher for LOKI cluster-task training.
 # Monitors GPU memory and CPU load before launching new jobs.
 # Skips already-completed runs (checks for Unimal-v0.pt).
+# Distributes jobs across multiple GPUs in round-robin fashion.
+# Properly tracks and cleans up child processes on exit.
 #
-# Usage: bash scripts/train_loki_all_cluster_tasks.sh [max_concurrent_jobs] [gpu_mem_threshold_mb]
+# Usage: bash scripts/train_loki_all_cluster_tasks.sh [max_concurrent_jobs] [gpu_mem_threshold_mb] [num_gpus]
 #
-# Example: bash scripts/train_loki_all_cluster_tasks.sh 2 10000
+# Example: bash scripts/train_loki_all_cluster_tasks.sh 2 10000 2
 #   - Runs at most 2 concurrent jobs
 #   - Only launches a new job if >= 10000 MiB GPU memory is free
+#   - Distributes across 2 GPUs
 
 MAX_CONCURRENT=${1:-2}           # Max concurrent jobs (default: 2)
 GPU_MEM_THRESHOLD=${2:-10000}    # Min free GPU memory in MiB to launch (default: 10000)
-GPU_ID=0                         # GPU device index
+NUM_GPUS=${3:-2}                 # Number of GPUs available (default: 2)
+NEXT_GPU=0                       # Round-robin GPU assignment counter
 
 NUM_WALKER=20
 NUM_CLUSTERS=20
@@ -21,6 +25,28 @@ TASKS=("locomotion" "obstacle" "incline")
 DROP_FREQ=2
 NUM_DROP=2
 
+# Track child PIDs for cleanup
+CHILD_PIDS=()
+
+# Cleanup handler: kill all child processes on exit/signal
+cleanup() {
+    echo ""
+    echo "[CLEANUP] Received signal, killing all child processes..."
+    for pid in "${CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null
+            echo "  Killed PID $pid"
+        fi
+    done
+    # Also kill any remaining train_loki.py processes in our process group
+    pkill -P $$ 2>/dev/null
+    wait 2>/dev/null
+    echo "[CLEANUP] Done."
+    exit 1
+}
+
+trap cleanup SIGTERM SIGINT SIGHUP EXIT
+
 # Map task to env_type for output path matching
 get_env_type() {
     case "$1" in
@@ -29,14 +55,23 @@ get_env_type() {
     esac
 }
 
-# Get free GPU memory in MiB
+# Get minimum free GPU memory across all GPUs in MiB
 get_free_gpu_mem() {
-    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i $GPU_ID 2>/dev/null | tr -d ' '
+    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1 | tr -d ' '
 }
 
-# Count currently running training jobs (by checking for train_loki.py processes)
+# Count currently running training jobs from our tracked PIDs
 count_running_jobs() {
-    pgrep -f "python tools/train_loki.py" | wc -l
+    local count=0
+    local alive_pids=()
+    for pid in "${CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            count=$((count + 1))
+            alive_pids+=("$pid")
+        fi
+    done
+    CHILD_PIDS=("${alive_pids[@]}")
+    echo $count
 }
 
 # Check if a job is already completed
@@ -68,11 +103,11 @@ echo "=== LOKI Cluster-Task Batch Launcher ==="
 echo "Tasks: ${TASKS[*]}"
 echo "Clusters: 0-$((NUM_CLUSTERS-1))"
 echo "Max concurrent jobs: $MAX_CONCURRENT"
+echo "Num GPUs: $NUM_GPUS"
 echo "GPU memory threshold: ${GPU_MEM_THRESHOLD} MiB"
 echo ""
 
 TOTAL_JOBS=$((NUM_CLUSTERS * ${#TASKS[@]}))
-COMPLETED=0
 SKIPPED=0
 LAUNCHED=0
 
@@ -91,9 +126,11 @@ for TASK in "${TASKS[@]}"; do
         echo "[WAIT] $JOB_ID - checking resources..."
         wait_for_resources
 
-        # Launch job
-        echo "[LAUNCH] $JOB_ID"
-        bash scripts/train_loki_task.sh $NUM_WALKER $NUM_CLUSTERS $CLUSTER_LABEL $RNG_SEED $TASK
+        # Launch job on next GPU (round-robin)
+        echo "[LAUNCH] $JOB_ID on GPU $NEXT_GPU"
+        bash scripts/train_loki_task.sh $NUM_WALKER $NUM_CLUSTERS $CLUSTER_LABEL $RNG_SEED $TASK $NEXT_GPU
+        CHILD_PIDS+=($!)
+        NEXT_GPU=$(( (NEXT_GPU + 1) % NUM_GPUS ))
         LAUNCHED=$((LAUNCHED + 1))
 
         # Brief pause to let the process start and allocate GPU memory
@@ -102,12 +139,20 @@ for TASK in "${TASKS[@]}"; do
 done
 
 echo ""
-echo "=== Batch launcher done ==="
+echo "=== Batch launcher: all jobs submitted ==="
 echo "Total jobs: $TOTAL_JOBS"
 echo "Skipped (already done): $SKIPPED"
 echo "Launched: $LAUNCHED"
 echo ""
-echo "Jobs may still be running in background. Monitor with:"
-echo "  pgrep -af 'train_loki.py'"
-echo "  nvidia-smi"
-echo "  tail -f log/train_loki_task/<task>/*.log"
+echo "Waiting for remaining jobs to finish..."
+
+# Wait for all tracked children
+for pid in "${CHILD_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+        wait "$pid" 2>/dev/null
+    fi
+done
+
+# Disable cleanup trap on normal exit
+trap - EXIT
+echo "=== All jobs completed ==="

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Train LOKI co-design from scratch for a specific task and cluster.
-# Usage: bash scripts/train_loki_task.sh <num_walkers> <num_clusters> <cluster_label> <seed> <task_name>
-# Example: bash scripts/train_loki_task.sh 20 20 0 3429 obstacle
+# Usage: bash scripts/train_loki_task.sh <num_walkers> <num_clusters> <cluster_label> <seed> <task_name> [gpu_id]
+# Example: bash scripts/train_loki_task.sh 20 20 0 3429 obstacle 0
 #
 # Supported tasks: locomotion, obstacle, incline, bump, push_box_incline
 
@@ -10,6 +10,7 @@ NUM_CLUSTERS=$2
 CLUSTER_LABEL=$3
 RNG_SEED=$4
 TASK_NAME=$5
+GPU_ID=${6:-0}
 
 DROP_FREQ=2
 NUM_DROP=2
@@ -53,9 +54,10 @@ CKPT_PATH="./output/loki/$ENV_TYPE/kmeans_cluster/$NUM_CLUSTERS/$CLUSTER_LABEL/w
 VAE_PATH="VAE_50k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_epochs200_20260209_215748"
 
 cd metamorph
-PYTHONPATH=./ python tools/train_loki.py \
+CUDA_VISIBLE_DEVICES=$GPU_ID PYTHONPATH=./ python tools/train_loki.py \
                         --cfg $CFG_FILE \
                         --vae_path $VAE_PATH \
+                        --device cuda:0 \
                         OUT_DIR $CKPT_PATH \
                         LOKI.TRAIN True \
                         LOKI.NUM_WALKER $NUM_WALKER \
