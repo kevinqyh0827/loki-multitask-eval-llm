@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=loki-eval
-#SBATCH --partition=gpu
+#SBATCH --partition=work1
 #SBATCH --gres=gpu:a100:2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=48:00:00
+#SBATCH --time=3-00:00:00
 #SBATCH --output=log/slurm/loki-eval-%j.out
 #SBATCH --error=log/slurm/loki-eval-%j.err
 
