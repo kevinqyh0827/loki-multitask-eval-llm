@@ -30,11 +30,16 @@ from vae.data import VectorDataset
 from tools.pkl_2_vec_new import convert_all_pkl_to_vec
 from tools.util import BINARY_TOKEN, CONTINUOUS_TOKEN, CATEGORY_TOKEN, TOTAL_CATEGORY, THETA_CLASS, PHI_CLASS, JOINTX_CLASS, JOINTY_CLASS
 
-from derl.derl.envs.morphology import SymmetricUnimal
-from derl.derl.utils import xml as xu
-from derl.derl.utils import similarity as simu
-
-from derl.derl.config import cfg as derl_cfg
+try:
+    from derl.envs.morphology import SymmetricUnimal
+    from derl.utils import xml as xu
+    from derl.utils import similarity as simu
+    from derl.config import cfg as derl_cfg
+except ImportError:
+    from derl.derl.envs.morphology import SymmetricUnimal
+    from derl.derl.utils import xml as xu
+    from derl.derl.utils import similarity as simu
+    from derl.derl.config import cfg as derl_cfg
 
 # from torch.utils import tensorboard
 # from torch.utils.tensorboard import SummaryWriter
