@@ -94,6 +94,24 @@ class DummyVecEnv(VecEnv):
     def _obs_from_buf(self):
         return dict_to_obs(copy_obs_dict(self.buf_obs))
 
+    def log(self):
+        # No-op, matches SubprocVecEnv behavior
+        pass
+
+    def reset_one_unimal(self, data=None):
+        for e in range(self.num_envs):
+            obs = self.envs[e].reset_one_unimal(data)
+            self._save_obs(e, obs)
+        return self._obs_from_buf()
+
+    def update_unimal(self, data=None):
+        for e in range(self.num_envs):
+            self.envs[e].update_unimal(data)
+
+    def update_one_unimal(self, data=None):
+        for e in range(self.num_envs):
+            self.envs[e].update_one_unimal(data)
+
     def get_images(self):
         return [env.render(mode="rgb_array") for env in self.envs]
 
