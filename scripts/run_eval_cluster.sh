@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=loki-eval
 #SBATCH --partition=work1
-#SBATCH --gres=gpu:a100:2
 #SBATCH --cpus-per-task=48
 #SBATCH --mem=256G
 #SBATCH --time=3-00:00:00
@@ -10,7 +9,12 @@
 
 # === LOKI Cluster-Task Evaluation on Palmetto ===
 # Runs 3 tasks (locomotion, obstacle, incline) x 20 clusters = 60 training runs
-# Uses 2 A100 GPUs with 2 concurrent jobs
+# Auto-detects number of GPUs on the node.
+#
+# Submit examples:
+#   sbatch --gres=gpu:a100:2 scripts/run_eval_cluster.sh   # 2x A100
+#   sbatch --gres=gpu:h200:4 scripts/run_eval_cluster.sh   # 4x H200
+#   sbatch --gres=gpu:8 scripts/run_eval_cluster.sh        # 8x any GPU
 
 # Setup environment
 module load cuda/12.3
@@ -25,20 +29,35 @@ mkdir -p log/train_loki_task/locomotion
 mkdir -p log/train_loki_task/obstacle
 mkdir -p log/train_loki_task/incline
 
-# Print job info
+# Print job and node info
 echo "=== LOKI Evaluation Job ==="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
-echo "GPUs: $CUDA_VISIBLE_DEVICES"
+echo "Partition: $SLURM_JOB_PARTITION"
+echo "GPUs (CUDA_VISIBLE_DEVICES): $CUDA_VISIBLE_DEVICES"
+echo "CPUs allocated: $SLURM_CPUS_ON_NODE"
+echo "Memory allocated: $SLURM_MEM_PER_NODE MB"
 echo "Start time: $(date)"
 echo ""
 
+echo "--- GPU Details ---"
+nvidia-smi --query-gpu=index,name,memory.total,memory.free,driver_version --format=csv,noheader
+echo ""
 nvidia-smi
 echo ""
 
-# Run the adaptive batch launcher: 2 GPUs, 5 min (300s) stabilization between launches
-# The script auto-discovers how many concurrent jobs fit based on measured resource usage
-bash scripts/train_loki_all_cluster_tasks.sh 2 300
+echo "--- System RAM ---"
+free -h
+echo ""
+
+# Auto-detect number of GPUs on this node
+NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l)
+echo "Detected $NUM_GPUS GPUs"
+echo ""
+
+# Run the adaptive batch launcher with detected GPU count
+# Args: num_gpus, profiling_stabilize_seconds, phase2_stabilize_seconds
+bash scripts/train_loki_all_cluster_tasks.sh $NUM_GPUS 300 30
 
 echo ""
 echo "End time: $(date)"

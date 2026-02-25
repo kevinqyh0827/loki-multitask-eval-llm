@@ -73,4 +73,5 @@ CUDA_VISIBLE_DEVICES=$GPU_ID PYTHONPATH=./ python tools/train_loki.py \
                         LOKI.SAMPLE_SIZE $NUM_SAMPLE \
                         LOKI.MUTATE_SAMPLE False \
                         ENV.TYPE "$ENV_TYPE" \
+                        VECENV.TYPE DummyVecEnv \
                         RNG_SEED $RNG_SEED > ../$LOG_FILE 2>&1

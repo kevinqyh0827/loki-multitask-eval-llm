@@ -11,13 +11,14 @@
 # Distributes jobs across GPUs in round-robin fashion.
 # Displays running/queued job status during waits.
 #
-# Usage: bash scripts/train_loki_all_cluster_tasks.sh [num_gpus] [stabilize_seconds]
+# Usage: bash scripts/train_loki_all_cluster_tasks.sh [num_gpus] [profiling_stabilize_s] [phase2_stabilize_s]
 #
-# Example: bash scripts/train_loki_all_cluster_tasks.sh 2 300
-#   - Uses 2 GPUs, waits 300s (5 min) between launches for stabilization
+# Example: bash scripts/train_loki_all_cluster_tasks.sh 2 300 30
+#   - Uses 2 GPUs, 300s profiling stabilization, 30s between Phase 2 launches
 
 NUM_GPUS=${1:-2}                 # Number of GPUs available (default: 2)
 STABILIZE_TIME=${2:-300}         # Seconds to wait after launch for resource stabilization (default: 5 min)
+PHASE2_STABILIZE=${3:-30}        # Seconds between launches in Phase 2 (default: 30s)
 SAFETY_MARGIN=90                 # Use only 90% of measured capacity (reserve 10% for eval bursts)
 
 NUM_WALKER=20
@@ -84,14 +85,35 @@ is_completed() {
     [ -f "$ckpt" ]
 }
 
-# Get minimum free GPU memory across all GPUs in MiB
+# Get total free GPU memory (sum across all GPUs) in MiB
 get_free_gpu_mem() {
-    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1 | tr -d ' '
+    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | awk '{s+=$1} END {print s}'
 }
 
 # Get total GPU memory (sum across all GPUs) in MiB
 get_total_gpu_mem() {
     nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk '{s+=$1} END {print s}'
+}
+
+# Get free memory for a specific GPU index, in MiB
+get_gpu_free_mem() {
+    local gpu_idx=$1
+    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits --id=$gpu_idx 2>/dev/null | tr -d ' '
+}
+
+# Pick the GPU with the most free memory; sets NEXT_GPU and prints its free MiB
+pick_best_gpu() {
+    local best_gpu=0
+    local best_free=0
+    for gpu in $(seq 0 $((NUM_GPUS - 1))); do
+        local free=$(get_gpu_free_mem $gpu)
+        if [ "$free" -gt "$best_free" ]; then
+            best_free=$free
+            best_gpu=$gpu
+        fi
+    done
+    NEXT_GPU=$best_gpu
+    echo $best_free
 }
 
 # Get available system RAM in MiB
@@ -191,7 +213,8 @@ launch_next_job() {
     PID_TO_START[$pid]=$(date +%s)
 
     echo "[LAUNCH] $job_desc (PID=$pid)"
-    NEXT_GPU=$(( (NEXT_GPU + 1) % NUM_GPUS ))
+    # Pick GPU with most free memory for next launch (replaces round-robin)
+    pick_best_gpu > /dev/null
     LAUNCHED=$((LAUNCHED + 1))
 
     return 0
@@ -245,7 +268,8 @@ calculate_max_concurrent() {
 
 echo "=== LOKI Cluster-Task Adaptive Batch Launcher ==="
 echo "Num GPUs: $NUM_GPUS"
-echo "Stabilization time: ${STABILIZE_TIME}s"
+echo "Profiling stabilization: ${STABILIZE_TIME}s"
+echo "Phase 2 stabilization: ${PHASE2_STABILIZE}s"
 echo "Safety margin: ${SAFETY_MARGIN}%"
 echo ""
 
@@ -352,20 +376,26 @@ while true; do
         fi
     fi
 
-    # Try to launch more jobs if slots available
-    if [ "$pending_left" -gt 0 ] && [ "$running" -lt "$MAX_CONCURRENT" ]; then
+    # Try to launch jobs to fill available slots
+    launched_this_round=0
+    while [ "$pending_left" -gt 0 ] && [ "$running" -lt "$MAX_CONCURRENT" ]; do
         free_gpu=$(get_free_gpu_mem)
         free_ram=$(get_free_ram)
 
         if [ "$free_gpu" -gt "$GPU_PER_JOB" ] && [ "$free_ram" -gt "$RAM_PER_JOB" ]; then
             launch_next_job
-            print_status
-
-            # Wait for the new job to stabilize before considering launching another
-            echo "[STABILIZE] Waiting ${STABILIZE_TIME}s for new job to allocate resources..."
-            sleep $STABILIZE_TIME
-            continue
+            launched_this_round=$((launched_this_round + 1))
+            running=$((running + 1))
+            pending_left=$((pending_left - 1))
+        else
+            break
         fi
+    done
+    if [ "$launched_this_round" -gt 0 ]; then
+        print_status
+        echo "[STABILIZE] Launched $launched_this_round job(s), waiting ${PHASE2_STABILIZE}s..."
+        sleep $PHASE2_STABILIZE
+        continue
     fi
 
     # Nothing to launch right now, show status and wait
