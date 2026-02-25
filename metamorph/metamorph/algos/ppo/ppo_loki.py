@@ -807,26 +807,30 @@ class LOKI:
     def eval_random_sample(self, sampled_ids, num_samples, initialize=False):
         self.actor_critic.eval()
 
-        # Use DummyVecEnv (sequential, in-process) instead of SubprocVecEnv to avoid
-        # forking subprocesses. This eliminates the "Cannot allocate memory" error on
-        # SLURM clusters where multiple training jobs share the same memory cgroup.
-        env = make_vec_envs(training=False, norm_rew=False, num_env=num_samples,
-                            tmp_sample=True, sampled_ids=sampled_ids, force_dummy=True)
-        set_ob_rms(env, get_ob_rms(self.envs))
-
+        # Use DummyVecEnv in batches: avoids fork OOM (no subprocesses) while keeping
+        # GPU memory low (only batch_size envs loaded at a time, not all 128).
+        batch_size = cfg.PPO.NUM_ENVS
+        reward = [[] for _ in range(num_samples)]
         id_to_idx = {id_: idx for idx, id_ in enumerate(sampled_ids)}
 
-        reward = [[] for _ in range(num_samples)]
-        obs = env.reset()
-        with torch.no_grad():
-            for _ in range(200):
-                _, act, _ = self.agent.act(obs, num_samples=num_samples)
-                obs, rew, done, infos = env.step(act)
-                for info in infos:
-                    if "episode" in info.keys():
-                        reward[id_to_idx[info["name"]]].append(info["episode"]["r"])
+        for batch_start in range(0, num_samples, batch_size):
+            batch_ids = sampled_ids[batch_start:batch_start + batch_size]
+            batch_num = len(batch_ids)
 
-        env.close()
+            env = make_vec_envs(training=False, norm_rew=False, num_env=batch_num,
+                                tmp_sample=True, sampled_ids=batch_ids, force_dummy=True)
+            set_ob_rms(env, get_ob_rms(self.envs))
+
+            obs = env.reset()
+            with torch.no_grad():
+                for _ in range(200):
+                    _, act, _ = self.agent.act(obs, num_samples=batch_num)
+                    obs, rew, done, infos = env.step(act)
+                    for info in infos:
+                        if "episode" in info.keys():
+                            reward[id_to_idx[info["name"]]].append(info["episode"]["r"])
+
+            env.close()
 
         median_reward = [np.median(r) for r in reward]
 
@@ -835,23 +839,28 @@ class LOKI:
     def eval_random_sample_full(self, sampled_ids, num_samples, initialize=False):
         self.actor_critic.eval()
 
-        env = make_vec_envs(training=False, norm_rew=False, num_env=num_samples,
-                            tmp_sample_full=True, sampled_ids=sampled_ids, force_dummy=True)
-        set_ob_rms(env, get_ob_rms(self.envs))
-
+        batch_size = cfg.PPO.NUM_ENVS
+        reward = [[] for _ in range(num_samples)]
         id_to_idx = {id_: idx for idx, id_ in enumerate(sampled_ids)}
 
-        reward = [[] for _ in range(num_samples)]
-        obs = env.reset()
-        with torch.no_grad():
-            for _ in range(1000):
-                _, act, _ = self.agent.act(obs, num_samples=num_samples)
-                obs, rew, done, infos = env.step(act)
-                for info in infos:
-                    if "episode" in info.keys():
-                        reward[id_to_idx[info["name"]]].append(info["episode"]["r"])
+        for batch_start in range(0, num_samples, batch_size):
+            batch_ids = sampled_ids[batch_start:batch_start + batch_size]
+            batch_num = len(batch_ids)
 
-        env.close()
+            env = make_vec_envs(training=False, norm_rew=False, num_env=batch_num,
+                                tmp_sample_full=True, sampled_ids=batch_ids, force_dummy=True)
+            set_ob_rms(env, get_ob_rms(self.envs))
+
+            obs = env.reset()
+            with torch.no_grad():
+                for _ in range(1000):
+                    _, act, _ = self.agent.act(obs, num_samples=batch_num)
+                    obs, rew, done, infos = env.step(act)
+                    for info in infos:
+                        if "episode" in info.keys():
+                            reward[id_to_idx[info["name"]]].append(info["episode"]["r"])
+
+            env.close()
 
         median_reward = [np.median(r) for r in reward]
 
