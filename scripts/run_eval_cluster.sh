@@ -58,7 +58,7 @@ echo ""
 
 # Run the adaptive batch launcher with detected GPU count
 # Args: num_gpus, profiling_stabilize_seconds, phase2_stabilize_seconds
-bash scripts/train_loki_all_cluster_tasks.sh $NUM_GPUS 300 30
+bash scripts/train_loki_all_cluster_tasks.sh $NUM_GPUS 300 45
 
 echo ""
 echo "End time: $(date)"

@@ -117,7 +117,7 @@ def is_same_morphology(m1, m2):
 def check_all_pair_sim(all_pairs, unimal_m):
     # Create all pairs metric
     all_pairs_pc = [[unimal_m[u1], unimal_m[u2]] for u1, u2 in all_pairs]
-    p = Pool(int(multiprocessing.cpu_count() * 0.50))
+    p = Pool(min(int(multiprocessing.cpu_count() * 0.50), 8))
     data = p.starmap(is_same_morphology, all_pairs_pc)
     p.close()
     p.join()

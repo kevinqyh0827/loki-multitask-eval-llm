@@ -382,26 +382,19 @@ while true; do
         fi
     fi
 
-    # Try to launch jobs to fill available slots
-    launched_this_round=0
-    while [ "$pending_left" -gt 0 ] && [ "$running" -lt "$MAX_CONCURRENT" ]; do
-        free_gpu=$(get_free_gpu_mem)
+    # Try to launch ONE job per cycle, then wait for it to allocate resources
+    if [ "$pending_left" -gt 0 ] && [ "$running" -lt "$MAX_CONCURRENT" ]; then
+        # Check per-GPU free memory (not total across all GPUs)
+        best_free=$(pick_best_gpu)
         free_ram=$(get_free_ram)
 
-        if [ "$free_gpu" -gt "$GPU_PER_JOB" ] && [ "$free_ram" -gt "$RAM_PER_JOB" ]; then
+        if [ "$best_free" -gt "$GPU_PER_JOB" ] && [ "$free_ram" -gt "$RAM_PER_JOB" ]; then
             launch_next_job
-            launched_this_round=$((launched_this_round + 1))
-            running=$((running + 1))
-            pending_left=$((pending_left - 1))
-        else
-            break
+            print_status
+            echo "[STABILIZE] Waiting ${PHASE2_STABILIZE}s for resource allocation..."
+            sleep $PHASE2_STABILIZE
+            continue
         fi
-    done
-    if [ "$launched_this_round" -gt 0 ]; then
-        print_status
-        echo "[STABILIZE] Launched $launched_this_round job(s), waiting ${PHASE2_STABILIZE}s..."
-        sleep $PHASE2_STABILIZE
-        continue
     fi
 
     # Nothing to launch right now, show status and wait
