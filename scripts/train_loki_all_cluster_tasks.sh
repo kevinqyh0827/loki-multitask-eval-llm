@@ -190,6 +190,12 @@ print_status() {
     if [ "$GPU_PER_JOB" -gt 0 ]; then
         echo "  Per-job: ~${GPU_PER_JOB} MiB GPU, ~${RAM_PER_JOB} MiB RAM | Max concurrent: $MAX_CONCURRENT"
     fi
+
+    # Per-GPU breakdown
+    echo "  --- Per-GPU Usage ---"
+    nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null | while IFS= read -r line; do
+        echo "    GPU $line"
+    done
     echo "================================================================"
     echo ""
 }
