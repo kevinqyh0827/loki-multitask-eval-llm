@@ -18,7 +18,8 @@
 
 # Setup environment
 module load cuda/12.3
-source activate loki
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate loki
 
 # Navigate to repo
 cd /home/yinhonq/test_pipelines/loki-multitask-eval-llm

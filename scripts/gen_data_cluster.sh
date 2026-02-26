@@ -20,7 +20,8 @@
 
 # Setup environment
 module load cuda/12.3
-source activate loki
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate loki
 
 # Navigate to repo
 cd /home/yinhonq/test_pipelines/loki-multitask-eval-llm
@@ -123,6 +124,14 @@ cleanup_monitor() {
     fi
 }
 trap cleanup_monitor EXIT
+
+# Clean up any artifacts from a previous failed run
+if [ -d "derl/webdataset/ft" ] && [ ! -f "derl/webdataset/ft/init_setup_done" ]; then
+    echo "=== Cleaning up previous failed run artifacts ==="
+    rm -rf derl/webdataset/ft/xml/* derl/webdataset/ft/unimal_init/* derl/webdataset/ft/unimal_init_vec/* 2>/dev/null
+    echo "Cleaned up partial files from previous run."
+    echo ""
+fi
 
 # Step 1: Generate 500K morphologies (CPU-only, uses multiprocessing.Pool(128))
 STEP1_START=$(date +%s)

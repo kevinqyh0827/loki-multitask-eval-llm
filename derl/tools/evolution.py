@@ -70,7 +70,7 @@ def setup_output_dir():
         # "models",
         # "metadata",
         "xml",
-        # "unimal_init",
+        "unimal_init",
         # "rewards",
         # "videos",
         "error_metadata",
