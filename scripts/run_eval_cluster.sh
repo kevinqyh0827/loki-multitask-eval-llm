@@ -18,7 +18,7 @@
 
 # Setup environment
 module load cuda/12.3
-source "$(conda info --base)/etc/profile.d/conda.sh"
+source /home/yinhonq/miniconda3/etc/profile.d/conda.sh
 conda activate loki
 
 # Navigate to repo

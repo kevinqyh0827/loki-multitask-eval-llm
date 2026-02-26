@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=loki-datagen
 #SBATCH --partition=work1
-#SBATCH --cpus-per-task=128
+#SBATCH --cpus-per-task=48
 #SBATCH --mem=256G
 #SBATCH --time=1-00:00:00
 #SBATCH --output=log/slurm/loki-datagen-%j.out
@@ -16,11 +16,19 @@
 #
 # The script generates 2x candidates (1M) and deduplicates to 500K unique morphologies.
 # Estimated output size: ~10 GB (webdataset.tar)
-# No GPU required — purely CPU multiprocessing (128 processes).
+# No GPU required — purely CPU multiprocessing.
+#
+# Why 48 processes instead of 128:
+#   multiprocessing.Pool uses fork(), which duplicates the parent process's virtual
+#   memory for each child. With a large parent (PyTorch + NetworkX imports), 128 forks
+#   can exceed the SLURM memory allocation and trigger "Cannot allocate memory" (ENOMEM).
+#   48 processes is a safe balance between parallelism and memory usage.
+
+NUM_PROCESSES=48  # Parallel workers for morphology generation
 
 # Setup environment
 module load cuda/12.3
-source "$(conda info --base)/etc/profile.d/conda.sh"
+source /home/yinhonq/miniconda3/etc/profile.d/conda.sh
 conda activate loki
 
 # Navigate to repo
@@ -35,6 +43,7 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
 echo "CPUs allocated: $SLURM_CPUS_ON_NODE"
 echo "Memory allocated: $SLURM_MEM_PER_NODE MB"
+echo "NUM_PROCESSES: $NUM_PROCESSES"
 echo "Start time: $(date)"
 echo ""
 
@@ -133,10 +142,10 @@ if [ -d "derl/webdataset/ft" ] && [ ! -f "derl/webdataset/ft/init_setup_done" ];
     echo ""
 fi
 
-# Step 1: Generate 500K morphologies (CPU-only, uses multiprocessing.Pool(128))
+# Step 1: Generate 500K morphologies (CPU-only)
 STEP1_START=$(date +%s)
-echo "=== Step 1: Generating 500K morphology XMLs ==="
-bash scripts/evolve_init_xmls.sh webdataset 3429 4 10 500000
+echo "=== Step 1: Generating 500K morphology XMLs (${NUM_PROCESSES} processes) ==="
+bash scripts/evolve_init_xmls.sh webdataset 3429 4 10 500000 $NUM_PROCESSES
 STEP1_END=$(date +%s)
 STEP1_ELAPSED=$(( STEP1_END - STEP1_START ))
 echo "Step 1 done at: $(date) (elapsed: $(( STEP1_ELAPSED / 3600 ))h $(( (STEP1_ELAPSED % 3600) / 60 ))m $(( STEP1_ELAPSED % 60 ))s)"
