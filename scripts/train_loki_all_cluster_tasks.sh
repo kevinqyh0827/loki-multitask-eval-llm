@@ -154,14 +154,18 @@ detect_max_concurrent_per_gpu() {
     echo "[CONFIG] GPU 0 has ${gpu_mem} MiB VRAM -> max ${MAX_CONCURRENT_PER_GPU} concurrent per GPU"
 }
 
-# Count running jobs, prune dead PIDs, and apply failure cooldowns
-count_running_jobs() {
-    local count=0
+# Count running jobs, prune dead PIDs, and apply failure cooldowns.
+# IMPORTANT: Sets global RUNNING_COUNT instead of echoing, to avoid subshell issues
+# when called via $(count_running_jobs). All state changes (GPU_JOB_COUNT, CHILD_PIDS,
+# COMPLETED, FAILURE_COOLDOWN_UNTIL) persist in the parent shell.
+RUNNING_COUNT=0
+update_running_jobs() {
+    RUNNING_COUNT=0
     local alive_pids=()
     local now=$(date +%s)
     for pid in "${CHILD_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
-            count=$((count + 1))
+            RUNNING_COUNT=$((RUNNING_COUNT + 1))
             alive_pids+=("$pid")
         else
             wait "$pid" 2>/dev/null
@@ -202,14 +206,14 @@ count_running_jobs() {
         fi
     done
     CHILD_PIDS=("${alive_pids[@]}")
-    echo $count
 }
 
-# Get the next GPU in round-robin order (no slot check — caller handles capacity)
-get_next_gpu_rr() {
-    local gpu=$((NEXT_GPU % NUM_GPUS))
+# Advance the round-robin GPU counter and set TARGET_GPU.
+# IMPORTANT: Sets global TARGET_GPU instead of echoing, to avoid subshell issues.
+TARGET_GPU=0
+advance_gpu_rr() {
+    TARGET_GPU=$((NEXT_GPU % NUM_GPUS))
     NEXT_GPU=$(( (NEXT_GPU + 1) % NUM_GPUS ))
-    echo "$gpu"
 }
 
 # Launch the next job from the queue on the given GPU
@@ -247,8 +251,8 @@ launch_next_job() {
 
 # Measure per-job resource consumption (called after Phase 1)
 measure_per_job_usage() {
-    local running=$(count_running_jobs)
-    if [ "$running" -eq 0 ]; then
+    update_running_jobs
+    if [ "$RUNNING_COUNT" -eq 0 ]; then
         echo "[WARNING] No running jobs to measure."
         return 1
     fi
@@ -265,21 +269,21 @@ measure_per_job_usage() {
     local free_ram=$(get_free_ram)
     local used_ram=$((total_ram - free_ram))
 
-    GPU_PER_JOB=$((total_gpu_used / running))
-    RAM_PER_JOB=$((used_ram / running))
+    GPU_PER_JOB=$((total_gpu_used / RUNNING_COUNT))
+    RAM_PER_JOB=$((used_ram / RUNNING_COUNT))
 
     echo "[PROFILING] Per-job resource estimate: ~${GPU_PER_JOB} MiB GPU, ~${RAM_PER_JOB} MiB RAM"
 }
 
 # Display comprehensive job status
 print_status() {
-    local running=$(count_running_jobs)
+    update_running_jobs
     local queued=$(( ${#QUEUE_TASKS[@]} - QUEUE_IDX ))
     local now=$(date +%s)
     local total_max=$(( MAX_CONCURRENT_PER_GPU * NUM_GPUS ))
 
     echo ""
-    echo "=== Job Status (${running}/${total_max} running | ${queued} queued | ${COMPLETED} completed | ${SKIPPED} skipped) ==="
+    echo "=== Job Status (${RUNNING_COUNT}/${total_max} running | ${queued} queued | ${COMPLETED} completed | ${SKIPPED} skipped) ==="
 
     for pid in "${CHILD_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
@@ -391,11 +395,11 @@ for gpu in $(seq 0 $((NUM_GPUS - 1))); do
             elapsed=$((elapsed + sleep_chunk))
 
             # Check if job is still alive
-            local_running=$(count_running_jobs)
-            if [ "$local_running" -eq 0 ]; then
+            update_running_jobs
+            if [ "$RUNNING_COUNT" -eq 0 ]; then
                 echo "[WARNING] All jobs exited during Phase 1 stagger. Check logs."
             fi
-            echo "  Phase 1 stagger: ${elapsed}/${STAGGER_TIME}s (${local_running} jobs running)"
+            echo "  Phase 1 stagger: ${elapsed}/${STAGGER_TIME}s (${RUNNING_COUNT} jobs running)"
         done
     fi
 done
@@ -411,8 +415,8 @@ while [ "$elapsed" -lt "$STAGGER_TIME" ]; do
     fi
     sleep $sleep_chunk
     elapsed=$((elapsed + sleep_chunk))
-    local_running=$(count_running_jobs)
-    echo "  Phase 1 stabilize: ${elapsed}/${STAGGER_TIME}s (${local_running} jobs running)"
+    update_running_jobs
+    echo "  Phase 1 stabilize: ${elapsed}/${STAGGER_TIME}s (${RUNNING_COUNT} jobs running)"
 done
 
 # Measure per-job resource usage
@@ -425,11 +429,11 @@ echo ""
 echo "=== Phase 2: Sequential scheduling (max ${TOTAL_MAX} concurrent, ${STAGGER_TIME}s stagger, RAM threshold ${RAM_THRESHOLD} MiB) ==="
 
 while true; do
-    running=$(count_running_jobs)
+    update_running_jobs
     pending_left=$(( ${#QUEUE_TASKS[@]} - QUEUE_IDX ))
 
     # Exit when no running jobs and no pending jobs
-    if [ "$running" -eq 0 ] && [ "$pending_left" -eq 0 ]; then
+    if [ "$RUNNING_COUNT" -eq 0 ] && [ "$pending_left" -eq 0 ]; then
         break
     fi
 
@@ -447,8 +451,8 @@ while true; do
         fi
 
         # Check max concurrent limit
-        if [ "$running" -ge "$TOTAL_MAX" ]; then
-            echo "[WAIT] At max concurrent limit (${running}/${TOTAL_MAX}). Waiting for jobs to finish..."
+        if [ "$RUNNING_COUNT" -ge "$TOTAL_MAX" ]; then
+            echo "[WAIT] At max concurrent limit (${RUNNING_COUNT}/${TOTAL_MAX}). Waiting for jobs to finish..."
             print_status
             sleep 60
             continue
@@ -463,9 +467,9 @@ while true; do
             continue
         fi
 
-        # All conditions met — launch next job
-        target_gpu=$(get_next_gpu_rr)
-        launch_next_job $target_gpu
+        # All conditions met — launch next job on next GPU (round-robin)
+        advance_gpu_rr
+        launch_next_job $TARGET_GPU
         print_status
 
         # Stagger: wait 5 minutes before scheduling next
@@ -479,8 +483,8 @@ while true; do
             fi
             sleep $sleep_chunk
             elapsed=$((elapsed + sleep_chunk))
-            local_running=$(count_running_jobs)
-            echo "  Stagger: ${elapsed}/${STAGGER_TIME}s (${local_running} jobs running)"
+            update_running_jobs
+            echo "  Stagger: ${elapsed}/${STAGGER_TIME}s (${RUNNING_COUNT} jobs running)"
         done
         continue
     fi
