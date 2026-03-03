@@ -56,9 +56,10 @@ NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l
 echo "Detected $NUM_GPUS GPUs"
 echo ""
 
-# Run the adaptive batch launcher with detected GPU count
-# Args: num_gpus, profiling_stabilize_seconds, phase2_stabilize_seconds
-bash scripts/train_loki_all_cluster_tasks.sh $NUM_GPUS 300 45
+# Run the sequential scheduler with detected GPU count
+# Args: num_gpus, max_concurrent_per_gpu (0=auto-detect), test_mode (0=full, 1=reduced steps)
+# Override via environment: TEST_MODE=1 sbatch ... to run with reduced steps (1e5)
+bash scripts/train_loki_all_cluster_tasks.sh $NUM_GPUS 0 ${TEST_MODE:-0}
 
 echo ""
 echo "End time: $(date)"

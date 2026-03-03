@@ -1,11 +1,17 @@
 import hashlib
 import itertools
 import multiprocessing
+import os
 from multiprocessing import Pool
 
 import networkx as nx
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
+
+# When running many concurrent training jobs, fork-based multiprocessing
+# can trigger OOM because fork duplicates the parent's virtual memory.
+# Set LOKI_SEQUENTIAL_SIMILARITY=1 to disable Pool and run sequentially.
+_FORCE_SEQUENTIAL = os.environ.get("LOKI_SEQUENTIAL_SIMILARITY", "0") == "1"
 
 try:
     from derl.utils import file as fu
@@ -81,21 +87,26 @@ def get_ancestor_from_xml(path):
 
 def get_metric_in_parallel(paths, metric_name):
     """Get similarity metric for a list of unimals."""
-    num_workers = min(4, len(paths), multiprocessing.cpu_count())
-    p = Pool(num_workers)
-    if metric_name == "point_cloud":
-        data = p.map(point_cloud_from_xml, paths)
-    elif metric_name == "geom_orientation":
-        data = p.map(geom_orientations_from_xml, paths)
-    elif metric_name == "ancestor":
-        data = p.map(get_ancestor_from_xml, paths)
-    elif metric_name == "hash":
-        data = p.map(hash_from_xml, paths)
-    else:
+    metric_func = {
+        "point_cloud": point_cloud_from_xml,
+        "geom_orientation": geom_orientations_from_xml,
+        "ancestor": get_ancestor_from_xml,
+        "hash": hash_from_xml,
+    }
+    if metric_name not in metric_func:
         raise ValueError("Metric {} not supported.".format(metric_name))
 
-    p.close()
-    p.join()
+    func = metric_func[metric_name]
+
+    if _FORCE_SEQUENTIAL or len(paths) <= 2:
+        data = [func(p) for p in paths]
+    else:
+        num_workers = min(2, len(paths), multiprocessing.cpu_count())
+        p = Pool(num_workers)
+        data = p.map(func, paths)
+        p.close()
+        p.join()
+
     return {uid: m for uid, m in data}
 
 
@@ -117,10 +128,16 @@ def is_same_morphology(m1, m2):
 def check_all_pair_sim(all_pairs, unimal_m):
     # Create all pairs metric
     all_pairs_pc = [[unimal_m[u1], unimal_m[u2]] for u1, u2 in all_pairs]
-    p = Pool(min(int(multiprocessing.cpu_count() * 0.50), 8))
-    data = p.starmap(is_same_morphology, all_pairs_pc)
-    p.close()
-    p.join()
+
+    if _FORCE_SEQUENTIAL or len(all_pairs_pc) <= 4:
+        data = [is_same_morphology(*pair) for pair in all_pairs_pc]
+    else:
+        num_workers = min(2, int(multiprocessing.cpu_count() * 0.25))
+        p = Pool(num_workers)
+        data = p.starmap(is_same_morphology, all_pairs_pc)
+        p.close()
+        p.join()
+
     return data
 
 

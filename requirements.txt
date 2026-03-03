@@ -24,6 +24,9 @@ graphviz
 # XML parsing
 lxml>=6.0
 
+# LLM integration
+anthropic>=0.84
+
 # Utilities
 cloudpickle
 PyYAML

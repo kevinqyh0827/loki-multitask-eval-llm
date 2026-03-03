@@ -443,7 +443,13 @@ class LOKI:
             remove_unimals = remove_unimals[1:]
             unimals_to_remove.extend(remove_unimals)
 
-        assert len(unimals_to_keep) >= self.num_unimals
+        if len(unimals_to_keep) < self.num_unimals:
+            print(f"[WARNING] Only {len(unimals_to_keep)} unique morphologies "
+                  f"(need {self.num_unimals}). Allowing duplicate topologies to fill slots.")
+            needed = self.num_unimals - len(unimals_to_keep)
+            unimals_to_keep.extend(unimals_to_remove[:needed])
+            unimals_to_remove = unimals_to_remove[needed:]
+
         unimals_to_keep, unimals_to_remove = unimals_to_keep[:self.num_unimals], unimals_to_remove + unimals_to_keep[self.num_unimals:]
         
         print(f"Get {len(unimals_to_keep)} unique unimals")
@@ -831,6 +837,9 @@ class LOKI:
                             reward[id_to_idx[info["name"]]].append(info["episode"]["r"])
 
             env.close()
+            # Release cached GPU memory so other concurrent processes can use it
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         median_reward = [np.median(r) for r in reward]
 
@@ -861,11 +870,14 @@ class LOKI:
                             reward[id_to_idx[info["name"]]].append(info["episode"]["r"])
 
             env.close()
+            # Release cached GPU memory so other concurrent processes can use it
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         median_reward = [np.median(r) for r in reward]
 
         return median_reward
-    
+
     def save_sampled_agent_seq(self, cur_iter):
         num_agents = len(cfg.ENV.WALKERS)
 

@@ -11,10 +11,18 @@ CLUSTER_LABEL=$3
 RNG_SEED=$4
 TASK_NAME=$5
 GPU_ID=${6:-0}
+TEST_MODE=${7:-0}                   # 1 = reduced steps for testing (1e5 instead of 1e8)
 
 DROP_FREQ=2
 NUM_DROP=2
 NUM_SAMPLE=128
+
+# Set training steps based on test mode
+if [ "$TEST_MODE" -eq 1 ]; then
+    MAX_STEPS="1e5"
+else
+    MAX_STEPS="1e8"
+fi
 
 # Map task name to config YAML and output dir name
 case "$TASK_NAME" in
@@ -54,9 +62,21 @@ CKPT_PATH="./output/loki/$ENV_TYPE/kmeans_cluster/$NUM_CLUSTERS/$CLUSTER_LABEL/w
 VAE_PATH="VAE_50k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_epochs200_20260209_215748"
 
 cd metamorph
+
+# Adaptive CPU thread limits to prevent over-subscription when running concurrently.
+# Detects available CPUs and estimated max concurrent jobs, then divides fairly.
+TOTAL_CPUS=$(nproc 2>/dev/null || echo 48)
+NUM_GPUS_DETECTED=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l)
+EST_MAX_JOBS=$(( NUM_GPUS_DETECTED * 4 ))
+[ "$EST_MAX_JOBS" -lt 1 ] && EST_MAX_JOBS=1
+THREADS_PER_JOB=$(( TOTAL_CPUS / EST_MAX_JOBS ))
+[ "$THREADS_PER_JOB" -lt 2 ] && THREADS_PER_JOB=2
+
 # Note: runs in foreground here; the parent script (train_loki_all_cluster_tasks.sh)
 # backgrounds this script so it can properly track the PID for resource scheduling.
-CUDA_VISIBLE_DEVICES=$GPU_ID PYTHONPATH=./ python tools/train_loki.py \
+OMP_NUM_THREADS=$THREADS_PER_JOB MKL_NUM_THREADS=$THREADS_PER_JOB \
+    LOKI_SEQUENTIAL_SIMILARITY=1 \
+    CUDA_VISIBLE_DEVICES=$GPU_ID PYTHONPATH=./ python tools/train_loki.py \
                         --cfg $CFG_FILE \
                         --vae_path $VAE_PATH \
                         --device cuda:0 \
@@ -65,7 +85,7 @@ CUDA_VISIBLE_DEVICES=$GPU_ID PYTHONPATH=./ python tools/train_loki.py \
                         LOKI.NUM_WALKER $NUM_WALKER \
                         LOKI.NUM_DROP_WALKER $NUM_DROP \
                         LOKI.DROP_FREQ $DROP_FREQ \
-                        PPO.MAX_STATE_ACTION_PAIRS 1e8 \
+                        PPO.MAX_STATE_ACTION_PAIRS $MAX_STEPS \
                         LOG_PERIOD 10 \
                         LOKI.NUM_CLUSTERS $NUM_CLUSTERS \
                         LOKI.CLUSTER_LABEL $CLUSTER_LABEL \

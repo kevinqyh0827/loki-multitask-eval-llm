@@ -37,3 +37,9 @@ __pycache__/
 
 # Environment
 .env
+
+# images
+*.png
+
+# test results
+/results/
