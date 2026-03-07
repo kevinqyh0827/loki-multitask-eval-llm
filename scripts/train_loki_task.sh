@@ -63,6 +63,11 @@ VAE_PATH="VAE_50k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_
 
 cd metamorph
 
+# Deterministic wandb run ID derived from job parameters, so resumed runs continue
+# logging to the same wandb run automatically.
+WANDB_RUN_ID="loki-${ENV_TYPE}-c${NUM_CLUSTERS}-idx${CLUSTER_LABEL}-w${NUM_WALKER}-s${RNG_SEED}"
+export WANDB_RUN_ID
+
 # Auto-detect partial checkpoint for resume.
 # A run is "partial" if xml_step/ has iteration dirs but Unimal-v0_results.json does not
 # exist (results.json is only written after training completes fully).

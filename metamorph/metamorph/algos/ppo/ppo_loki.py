@@ -215,6 +215,15 @@ class LOKI:
         obs = self.envs.reset()
         self.buffer.to(self.device)
         self.start = time.time()
+
+        # On resume, shift start time backward by previously elapsed time so that
+        # elapsed_hours and FPS are cumulative across runs.
+        elapsed_file = os.path.join(cfg.OUT_DIR, "elapsed_time.json")
+        if cfg.LOKI.RESUME_ITER >= 0 and os.path.exists(elapsed_file):
+            prev_elapsed = fu.load_json(elapsed_file).get("elapsed", 0)
+            self.start -= prev_elapsed
+            print(f"[RESUME] Adding {prev_elapsed:.0f}s of previous elapsed time")
+
         prev_iter = 0
         worst_agent = []
 
@@ -615,6 +624,9 @@ class LOKI:
         if not path:
             path = os.path.join(cfg.OUT_DIR, self.file_prefix + ".pt")
         torch.save([self.actor_critic, get_ob_rms(self.envs)], path)
+        # Save elapsed time for resume continuity
+        elapsed = time.time() - self.start
+        fu.save_json({"elapsed": elapsed}, os.path.join(cfg.OUT_DIR, "elapsed_time.json"))
 
     def _log_stats(self, cur_iter):
         self._log_fps(cur_iter)
