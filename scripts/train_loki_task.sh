@@ -78,7 +78,7 @@ RESULTS_FILE="$CKPT_PATH/Unimal-v0_results.json"
 if [ -n "$RESUME_ITER" ] && [ ! -f "$RESULTS_FILE" ] && [ -f "$CKPT_PATH/Unimal-v0.pt" ]; then
     # Partial run detected: has checkpointed iterations and model weights, but never finished
     echo "[RESUME] Detected partial run at iter $RESUME_ITER, resuming from checkpoint"
-    RESUME_ARGS="PPO.CHECKPOINT_PATH $CKPT_PATH/Unimal-v0.pt LOKI.RESUME_ITER $RESUME_ITER MODEL.FINETUNE.FULL_MODEL True"
+    RESUME_ARGS="PPO.CHECKPOINT_PATH $CKPT_PATH/Unimal-v0.pt LOKI.RESUME_ITER $RESUME_ITER MODEL.FINETUNE.FULL_MODEL True LOKI.INIT_DIR $CKPT_PATH"
 fi
 
 # Adaptive CPU thread limits to prevent over-subscription when running concurrently.
