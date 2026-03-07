@@ -192,9 +192,13 @@ def create_init_unimals():
     ]
 
     unimal_ids = p.starmap(globals()[cfg.EVO.INIT_METHOD], idx_unimal_id)
+    p.close()
+    p.join()
 
+    print("Deduplicating {} morphologies...".format(len(unimal_ids)))
     G = simu.create_graph_from_uids(
-        None, unimal_ids, "geom_orientation", graph_type="species"
+        None, unimal_ids, "geom_orientation", graph_type="species",
+        use_hash=True, num_workers=cfg.EVO.NUM_PROCESSES,
     )
     cc = list(nx.connected_components(G))
 

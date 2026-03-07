@@ -107,16 +107,28 @@ and overall body topology — affects an agent's ability to perform different lo
 manipulation tasks.
 
 You will analyze empirical performance data from morphology clusters trained on known tasks, \
-then predict which morphology clusters would perform best on a new unseen task. Your predictions \
-must be grounded in physical reasoning about how morphological traits create advantages or \
-disadvantages for specific task demands.
+then predict which morphology clusters would perform best on a new unseen task. Your analysis \
+must include:
 
-Important: The morphology clusters were created by training a Variational Autoencoder (VAE) on \
-morphology descriptors of 50,000 procedurally generated robots, then clustering the latent space \
-with K-means (K=20). Each cluster therefore contains morphologically SIMILAR robots — they share \
-structural traits like limb count, body proportions, and joint configurations. When a cluster \
-performs well on a task, it indicates that the shared morphological traits of that cluster are \
-well-suited to that task's demands."""
+1. **Task Similarity Analysis**: For each known task, compute a similarity score (0.0 to 1.0) \
+with the new task along multiple physical dimensions: terrain type, reward structure, balance \
+requirements, speed vs stability tradeoff, sensory demands, and morphological demands. Explain \
+which dimensions drive similarity and which create differences.
+
+2. **Morphological Trait Transfer**: Based on observed performance patterns, infer what \
+morphological traits each cluster likely possesses, then reason about how those traits would \
+transfer to the new task's specific physical demands.
+
+3. **Physical Reasoning**: Ground every prediction in biomechanics and physics — how forces, \
+torques, center of mass, ground contact patterns, and joint configurations create advantages \
+or disadvantages for specific task demands.
+
+Important context: The morphology clusters were created by training a Variational Autoencoder \
+(VAE) on morphology descriptors of 50,000 procedurally generated robots, then clustering the \
+latent space with K-means (K=20). Each cluster contains morphologically SIMILAR robots — they \
+share structural traits like limb count, body proportions, and joint configurations. When a \
+cluster performs well on a task, it indicates that the shared morphological traits of that \
+cluster are well-suited to that task's demands."""
 
 
 def build_performance_table_text(perf_data):
@@ -230,6 +242,25 @@ def build_performance_table_text(perf_data):
     return raw_table + "\n" + norm_table + "\n" + rank_table + "\n" + profile
 
 
+CLUSTER_MORPHOLOGY_PROFILES = {
+    0: """**Cluster 0** — Medium complexity, ~7 limbs (100% of elite agents have 7 limbs).
+Consistent body plan across all tasks. Moderate performance on locomotion and obstacle,
+lowest on incline. Suggests a balanced body shape with moderate limb lengths, possibly
+optimized for flat-terrain efficiency but lacking the robustness needed for slopes.""",
+
+    2: """**Cluster 2** — High complexity, ~10-11 limbs (all elite agents have 10 or 11 limbs).
+The most limbs of any tested cluster. Low-to-moderate performance across all tasks,
+worst on incline. Many limbs may increase coordination difficulty and control complexity,
+but could provide redundancy and ground contact options on irregular terrain.""",
+
+    18: """**Cluster 18** — Low-medium complexity, ~6 limbs (75-95% of elite agents have 5-6 limbs).
+Dominant performer across ALL tasks. Best at locomotion (4908), obstacle (2362), and
+incline (3117) — leads by large margins. Fewer limbs likely means simpler, more efficient
+gaits, better controllability, and possibly stronger individual limbs with favorable
+joint configurations for diverse locomotion challenges.""",
+}
+
+
 def build_user_prompt(perf_data, new_task_key, custom_description=None):
     """Compose the full user prompt."""
     sections = []
@@ -265,16 +296,27 @@ known tasks. Your job is to analyze these results and predict performance on a n
     for task_name in ["locomotion", "obstacle", "incline"]:
         sections.append(KNOWN_TASK_DESCRIPTIONS[task_name])
 
-    # Section 3: Performance table
+    # Section 3: Cluster morphology profiles
+    sections.append("\n## Cluster Morphology Profiles\n")
+    sections.append(
+        "Based on analysis of all elite agents (20 per cluster per task = 60 total per cluster), "
+        "we have characterized each cluster's morphological traits:\n"
+    )
+    clusters_in_data = sorted(set(d["cluster"] for d in perf_data))
+    for c in clusters_in_data:
+        if c in CLUSTER_MORPHOLOGY_PROFILES:
+            sections.append(CLUSTER_MORPHOLOGY_PROFILES[c])
+
+    # Section 4: Performance table
     sections.append("\n## Empirical Performance Results\n")
     sections.append(
         "The following table shows the best reward achieved by the top-performing agent "
-        "in each cluster after full LOKI co-design training (1×10^8 environment steps). "
+        "in each cluster after full LOKI co-design training (1x10^8 environment steps). "
         "Higher reward means better performance.\n"
     )
     sections.append(build_performance_table_text(perf_data))
 
-    # Section 4: New task + request
+    # Section 5: New task + request
     sections.append("\n## New Unseen Task\n")
     if custom_description:
         sections.append(f"### Task: Custom\n{custom_description}")
@@ -291,34 +333,61 @@ Based on the performance patterns across the 3 known tasks, predict how each of 
 
 Please provide your analysis in the following structure:
 
-1. **Cross-Task Pattern Analysis**: What patterns do you observe in how the clusters perform \
-across locomotion, obstacle, and incline? What does each cluster's performance profile suggest \
-about the morphological traits of robots in that cluster?
+1. **Task Similarity Analysis**: For each known task (locomotion, obstacle, incline), compute \
+a similarity score (0.0 to 1.0) with the new task. Break down similarity along these physical \
+dimensions:
+   - Terrain type & complexity (flat vs obstacles vs slope)
+   - Reward structure (pure speed vs speed+stability vs manipulation)
+   - Balance requirements (how much stability matters)
+   - Speed vs robustness tradeoff
+   - Sensory demands (proprioception only vs height-field sensing)
+   - Contact pattern requirements (smooth gait vs adaptive stepping)
 
-2. **New Task Demand Analysis**: What specific morphological traits does the new task demand? \
-Which of the known tasks is it most similar to, and in what ways does it differ?
+2. **Cross-Task Pattern Analysis**: What patterns do you observe in how the clusters perform \
+across locomotion, obstacle, and incline? Given the cluster morphology profiles above, explain \
+WHY each cluster performs the way it does on each task using physical reasoning about forces, \
+torques, center of mass, ground contact, and joint configurations.
 
-3. **Cluster Recommendations**: For each cluster (0, 2, 18), predict its relative performance \
-on the new task. Rank them from best to worst, with reasoning grounded in physical analysis \
-of how morphological traits transfer between tasks.
+3. **Physical Transfer Reasoning**: For the new task, identify which physical demands are \
+SHARED with known tasks and which are NOVEL. For shared demands, explain how performance on \
+known tasks predicts performance on the new task. For novel demands, reason about which \
+morphological traits would help or hurt.
 
-4. **Confidence and Caveats**: How confident are you in your predictions? What factors could \
-cause your predictions to be wrong?
+4. **Cluster Recommendations**: Rank the clusters from best to worst for the new task, with \
+detailed physical reasoning for each.
+
+5. **Confidence and Caveats**: How confident are you? What could go wrong?
 
 **IMPORTANT**: Output your response as a JSON object with exactly this schema:
 ```json
 {
-  "cross_task_analysis": "Your analysis of patterns across known tasks...",
-  "new_task_analysis": "What the new task demands morphologically...",
+  "task_similarity": [
+    {
+      "known_task": "<locomotion|obstacle|incline>",
+      "overall_similarity": <float 0.0-1.0>,
+      "dimension_scores": {
+        "terrain": <float 0.0-1.0>,
+        "reward_structure": <float 0.0-1.0>,
+        "balance_requirements": <float 0.0-1.0>,
+        "speed_vs_robustness": <float 0.0-1.0>,
+        "sensory_demands": <float 0.0-1.0>,
+        "contact_pattern": <float 0.0-1.0>
+      },
+      "similarity_reasoning": "Why this similarity score..."
+    }
+  ],
+  "cross_task_analysis": "Physical reasoning about cluster performance patterns...",
+  "physical_transfer_reasoning": "How known-task performance transfers to new task...",
   "recommendations": [
     {
       "cluster_id": <int>,
       "predicted_rank": <int 1-3>,
       "predicted_performance": "<high|medium|low>",
       "confidence": "<high|medium|low>",
-      "reasoning": "Why this cluster would perform at this level..."
+      "reasoning": "Detailed physical reasoning..."
     }
   ],
+  "most_similar_task": "<locomotion|obstacle|incline>",
   "key_transfer_insights": "What cross-task correlations informed your predictions...",
   "caveats": "Limitations and potential sources of error..."
 }
@@ -334,7 +403,7 @@ your detailed reasoning as free text.""")
 # API call and response parsing
 # ---------------------------------------------------------------------------
 
-def call_claude(system_prompt, user_prompt, model="claude-sonnet-4-6", max_tokens=4096,
+def call_claude(system_prompt, user_prompt, model="claude-sonnet-4-6", max_tokens=8192,
                 temperature=0.3):
     """Call Claude API and return the response."""
     client = anthropic.Anthropic()
@@ -406,7 +475,7 @@ def main():
     parser.add_argument(
         "--max_tokens",
         type=int,
-        default=4096,
+        default=8192,
         help="Max tokens for Claude response",
     )
     parser.add_argument(
@@ -523,8 +592,29 @@ def main():
     print("=" * 70)
 
     if parsed_json:
+        # Task similarity scores
+        if "task_similarity" in parsed_json:
+            print("\nTask Similarity Analysis:")
+            for ts in parsed_json["task_similarity"]:
+                task = ts.get("known_task", "?")
+                score = ts.get("overall_similarity", "?")
+                print(f"  {task}: {score}")
+                dims = ts.get("dimension_scores", {})
+                if dims:
+                    dim_strs = [f"{k}={v}" for k, v in dims.items()]
+                    print(f"    Dimensions: {', '.join(dim_strs)}")
+
+            most_similar = parsed_json.get("most_similar_task", "")
+            if most_similar:
+                print(f"  => Most similar known task: {most_similar}")
+
         if "cross_task_analysis" in parsed_json:
-            print(f"\nCross-Task Analysis:\n  {parsed_json['cross_task_analysis'][:200]}...")
+            analysis = parsed_json["cross_task_analysis"]
+            print(f"\nCross-Task Analysis:\n  {analysis[:300]}{'...' if len(analysis) > 300 else ''}")
+
+        if "physical_transfer_reasoning" in parsed_json:
+            transfer = parsed_json["physical_transfer_reasoning"]
+            print(f"\nPhysical Transfer Reasoning:\n  {transfer[:300]}{'...' if len(transfer) > 300 else ''}")
 
         if "recommendations" in parsed_json:
             print("\nPredicted Rankings:")
@@ -537,14 +627,12 @@ def main():
                 )
                 reasoning = rec.get("reasoning", "")
                 if reasoning:
-                    # Print first 150 chars of reasoning
-                    short = reasoning[:150].replace("\n", " ")
-                    print(f"      {short}{'...' if len(reasoning) > 150 else ''}")
+                    short = reasoning[:200].replace("\n", " ")
+                    print(f"      {short}{'...' if len(reasoning) > 200 else ''}")
 
         if "caveats" in parsed_json:
             print(f"\nCaveats:\n  {parsed_json['caveats'][:200]}...")
     else:
-        # Print raw response excerpt
         print("\n(Could not parse structured JSON — showing raw response excerpt)")
         print(response_text[:500])
 

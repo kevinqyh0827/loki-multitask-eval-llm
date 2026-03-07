@@ -85,7 +85,7 @@ def get_ancestor_from_xml(path):
     return [unimal_id, metadata["lineage"].split("/")[0]]
 
 
-def get_metric_in_parallel(paths, metric_name):
+def get_metric_in_parallel(paths, metric_name, num_workers=None):
     """Get similarity metric for a list of unimals."""
     metric_func = {
         "point_cloud": point_cloud_from_xml,
@@ -101,7 +101,10 @@ def get_metric_in_parallel(paths, metric_name):
     if _FORCE_SEQUENTIAL or len(paths) <= 2:
         data = [func(p) for p in paths]
     else:
-        num_workers = min(2, len(paths), multiprocessing.cpu_count())
+        if num_workers is None:
+            num_workers = min(2, len(paths), multiprocessing.cpu_count())
+        else:
+            num_workers = min(num_workers, len(paths), multiprocessing.cpu_count())
         p = Pool(num_workers)
         data = p.map(func, paths)
         p.close()
@@ -175,6 +178,45 @@ def create_graph(all_pairs, all_pairs_sim):
     return G
 
 
+def create_graph_from_xml_paths_hashed(xml_paths, metric_name, num_workers=None):
+    """Memory-efficient dedup using hash-based grouping instead of O(N^2) all-pairs.
+
+    Groups morphologies by limb count (different counts can never match),
+    then hashes sorted/rounded orientations for permutation-invariant comparison.
+    """
+    from collections import defaultdict
+
+    unimal_m = get_metric_in_parallel(xml_paths, metric_name, num_workers=num_workers)
+
+    # Group by limb count (different counts can never be "same" per is_same_morphology)
+    limb_count_groups = defaultdict(list)
+    for uid, orientations in unimal_m.items():
+        limb_count_groups[len(orientations)].append(uid)
+
+    # Build graph: connect morphologies with same canonical hash
+    G = nx.Graph()
+    G.add_nodes_from(unimal_m.keys())
+
+    for limb_count, uids in limb_count_groups.items():
+        hash_buckets = defaultdict(list)
+        for uid in uids:
+            orientations = unimal_m[uid]
+            # Sort limb orientations for permutation invariance, round for tolerance
+            sorted_oris = sorted(
+                [tuple(round(v, 1) for v in ori) for ori in orientations]
+            )
+            canonical = hashlib.sha256(str(sorted_oris).encode()).hexdigest()
+            hash_buckets[canonical].append(uid)
+
+        # Connect all morphologies in same bucket (star topology: all connect to first)
+        for bucket_uids in hash_buckets.values():
+            if len(bucket_uids) > 1:
+                for i in range(1, len(bucket_uids)):
+                    G.add_edge(bucket_uids[0], bucket_uids[i])
+
+    return G
+
+
 def create_graph_from_xml_paths(xml_paths, metric_name, graph_type):
     # Create dict {uid: point_cloud}
     unimal_m = get_metric_in_parallel(xml_paths, metric_name)
@@ -198,12 +240,16 @@ def create_graph_from_xml_paths(xml_paths, metric_name, graph_type):
 
 
 def create_graph_from_uids(
-    sweep_name, uids, metric_name, graph_type="species", task_num=1, subfolder="xml"
+    sweep_name, uids, metric_name, graph_type="species", task_num=1, subfolder="xml",
+    use_hash=False, num_workers=None,
 ):
     xml_paths = [
         fu.id2path(uid, subfolder, sweep_name=sweep_name, task_num=task_num)
         for uid in uids
     ]
+    if use_hash:
+        return create_graph_from_xml_paths_hashed(xml_paths, metric_name,
+                                                  num_workers=num_workers)
     return create_graph_from_xml_paths(xml_paths, metric_name, graph_type)
 
 def create_graph_from_paths(
