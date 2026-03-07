@@ -63,6 +63,19 @@ VAE_PATH="VAE_50k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_
 
 cd metamorph
 
+# Auto-detect partial checkpoint for resume.
+# A run is "partial" if xml_step/ has iteration dirs but Unimal-v0_results.json does not
+# exist (results.json is only written after training completes fully).
+RESUME_ARGS=""
+RESUME_ITER=$(ls -d $CKPT_PATH/xml_step/*/ 2>/dev/null | xargs -I{} basename {} | sort -n | tail -1)
+RESULTS_FILE="$CKPT_PATH/Unimal-v0_results.json"
+
+if [ -n "$RESUME_ITER" ] && [ ! -f "$RESULTS_FILE" ] && [ -f "$CKPT_PATH/Unimal-v0.pt" ]; then
+    # Partial run detected: has checkpointed iterations and model weights, but never finished
+    echo "[RESUME] Detected partial run at iter $RESUME_ITER, resuming from checkpoint"
+    RESUME_ARGS="PPO.CHECKPOINT_PATH $CKPT_PATH/Unimal-v0.pt LOKI.RESUME_ITER $RESUME_ITER MODEL.FINETUNE.FULL_MODEL True"
+fi
+
 # Adaptive CPU thread limits to prevent over-subscription when running concurrently.
 # Detects available CPUs and estimated max concurrent jobs, then divides fairly.
 TOTAL_CPUS=$(nproc 2>/dev/null || echo 48)
@@ -94,4 +107,5 @@ OMP_NUM_THREADS=$THREADS_PER_JOB MKL_NUM_THREADS=$THREADS_PER_JOB \
                         LOKI.MUTATE_SAMPLE False \
                         ENV.TYPE "$ENV_TYPE" \
                         VECENV.TYPE DummyVecEnv \
-                        RNG_SEED $RNG_SEED > ../$LOG_FILE 2>&1
+                        RNG_SEED $RNG_SEED \
+                        $RESUME_ARGS > ../$LOG_FILE 2>&1

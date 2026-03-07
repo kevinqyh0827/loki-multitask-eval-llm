@@ -97,8 +97,11 @@ is_completed() {
     local task=$1
     local cluster=$2
     local env_type=$(get_env_type "$task")
-    local ckpt="metamorph/output/loki/$env_type/kmeans_cluster/$NUM_CLUSTERS/$cluster/walker$NUM_WALKER/freq$DROP_FREQ/drop$NUM_DROP/seed$RNG_SEED/Unimal-v0.pt"
-    [ -f "$ckpt" ]
+    # Use results.json as the completion marker — it is only written after train() finishes
+    # and save_rewards() runs.  Unimal-v0.pt is saved periodically during training so it
+    # cannot distinguish a partial run from a completed one.
+    local results="metamorph/output/loki/$env_type/kmeans_cluster/$NUM_CLUSTERS/$cluster/walker$NUM_WALKER/freq$DROP_FREQ/drop$NUM_DROP/seed$RNG_SEED/Unimal-v0_results.json"
+    [ -f "$results" ]
 }
 
 get_gpu_free_mem() {
