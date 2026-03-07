@@ -149,18 +149,32 @@ def main():
         wandb_kwargs["id"] = wandb_run_id
         wandb_kwargs["resume"] = "allow"
     # Stagger concurrent wandb.init() calls to avoid API rate limits on HPC
-    time.sleep(random.uniform(0, 30))
-    wandb_settings = wandb.Settings(init_timeout=300)
+    stagger = random.uniform(0, 30)
+    print(f"[WANDB] Staggering init by {stagger:.0f}s", flush=True)
+    time.sleep(stagger)
     project = "LOKI" if cfg.LOKI.TRAIN else "LOKI-eval"
     wandb_mode = os.environ.get("WANDB_MODE", "online")
-    print(f"[WANDB] Initializing with mode={wandb_mode}, project={project}, run_id={wandb_run_id or 'auto'}")
-    try:
-        wandb.init(project=project, name=cfg.OUT_DIR, settings=wandb_settings, **wandb_kwargs)
-    except wandb.errors.CommError:
-        print("[WANDB] Online init timed out, falling back to offline mode")
-        os.environ["WANDB_MODE"] = "offline"
-        wandb.init(project=project, name=cfg.OUT_DIR, settings=wandb_settings, **wandb_kwargs)
-    print(f"[WANDB] Initialized successfully — mode={wandb.run.settings.mode}, url={wandb.run.get_url() or 'offline'}")
+    print(f"[WANDB] Initializing mode={wandb_mode}, project={project}, run_id={wandb_run_id or 'auto'}", flush=True)
+
+    # Use short timeout (60s). The old 300s caused wandb to hang for minutes
+    # when the resume="allow" API lookup was rate-limited by concurrent jobs.
+    wandb_settings = wandb.Settings(init_timeout=60)
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            wandb.init(project=project, name=cfg.OUT_DIR, mode=wandb_mode,
+                       settings=wandb_settings, **wandb_kwargs)
+            break
+        except Exception as e:
+            if attempt < max_retries:
+                wait = 15 * attempt + random.uniform(0, 10)
+                print(f"[WANDB] Init failed (attempt {attempt}/{max_retries}): {e}. Retrying in {wait:.0f}s...", flush=True)
+                time.sleep(wait)
+            else:
+                print(f"[WANDB] Init failed after {max_retries} attempts, falling back to offline: {e}", flush=True)
+                wandb.init(project=project, name=cfg.OUT_DIR, mode="offline",
+                           settings=wandb_settings, **wandb_kwargs)
+    print(f"[WANDB] Ready — mode={wandb.run.settings.mode}, url={wandb.run.get_url() or 'offline'}", flush=True)
     # Save the config
     dump_cfg()
     loki_train(args, train=cfg.LOKI.TRAIN)
