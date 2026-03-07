@@ -1,6 +1,8 @@
 import argparse
 import os
 import sys
+import time
+import random
 
 import torch
 import wandb
@@ -146,10 +148,11 @@ def main():
     if wandb_run_id:
         wandb_kwargs["id"] = wandb_run_id
         wandb_kwargs["resume"] = "allow"
-    if cfg.LOKI.TRAIN:
-        wandb.init(project="LOKI", name=cfg.OUT_DIR, **wandb_kwargs)
-    else:
-        wandb.init(project="LOKI-eval", name=cfg.OUT_DIR, **wandb_kwargs)
+    # Stagger concurrent wandb.init() calls to avoid API rate limits on HPC
+    time.sleep(random.uniform(0, 30))
+    wandb_settings = wandb.Settings(init_timeout=300)
+    project = "LOKI" if cfg.LOKI.TRAIN else "LOKI-eval"
+    wandb.init(project=project, name=cfg.OUT_DIR, settings=wandb_settings, **wandb_kwargs)
     # Save the config
     dump_cfg()
     loki_train(args, train=cfg.LOKI.TRAIN)
