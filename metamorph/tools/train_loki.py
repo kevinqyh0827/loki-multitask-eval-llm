@@ -152,7 +152,15 @@ def main():
     time.sleep(random.uniform(0, 30))
     wandb_settings = wandb.Settings(init_timeout=300)
     project = "LOKI" if cfg.LOKI.TRAIN else "LOKI-eval"
-    wandb.init(project=project, name=cfg.OUT_DIR, settings=wandb_settings, **wandb_kwargs)
+    wandb_mode = os.environ.get("WANDB_MODE", "online")
+    print(f"[WANDB] Initializing with mode={wandb_mode}, project={project}, run_id={wandb_run_id or 'auto'}")
+    try:
+        wandb.init(project=project, name=cfg.OUT_DIR, settings=wandb_settings, **wandb_kwargs)
+    except wandb.errors.CommError:
+        print("[WANDB] Online init timed out, falling back to offline mode")
+        os.environ["WANDB_MODE"] = "offline"
+        wandb.init(project=project, name=cfg.OUT_DIR, settings=wandb_settings, **wandb_kwargs)
+    print(f"[WANDB] Initialized successfully — mode={wandb.run.settings.mode}, url={wandb.run.get_url() or 'offline'}")
     # Save the config
     dump_cfg()
     loki_train(args, train=cfg.LOKI.TRAIN)

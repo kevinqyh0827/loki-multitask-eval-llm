@@ -67,6 +67,19 @@ cd metamorph
 # logging to the same wandb run automatically.
 WANDB_RUN_ID="loki-${ENV_TYPE}-c${NUM_CLUSTERS}-idx${CLUSTER_LABEL}-w${NUM_WALKER}-s${RNG_SEED}"
 export WANDB_RUN_ID
+export WANDB_MODE="${WANDB_MODE:-online}"
+echo "[WANDB] Mode: $WANDB_MODE | Run ID: $WANDB_RUN_ID"
+
+# Quick wandb API connectivity check (non-blocking, 5s timeout)
+# Note: api.wandb.ai returns 404 for /healthcheck but any HTTP response means connectivity works.
+if [ "$WANDB_MODE" = "online" ]; then
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://api.wandb.ai/healthcheck 2>/dev/null)
+    if [ -n "$HTTP_CODE" ] && [ "$HTTP_CODE" != "000" ]; then
+        echo "[WANDB] API reachable (HTTP $HTTP_CODE) — online logging enabled"
+    else
+        echo "[WANDB] WARNING: API unreachable — will fall back to offline if init fails"
+    fi
+fi
 
 # Auto-detect partial checkpoint for resume.
 # A run is "partial" if xml_step/ has iteration dirs but Unimal-v0_results.json does not
