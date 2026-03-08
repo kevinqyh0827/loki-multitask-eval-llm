@@ -133,7 +133,11 @@ class LOKI:
             self.initialize_kmeans_cluster_xml_from_dir()
         else:
             self.initialize_kmeans_cluster_xml()
-        self.save_distance(cur_iter=0)
+        # Only compute initial distance for fresh runs; on resume the distance
+        # was already logged in the previous run and logging at cur_iter=0 would
+        # create a wrong data point at the start of the wandb chart.
+        if cfg.LOKI.RESUME_ITER < 0:
+            self.save_distance(cur_iter=0)
         # self.get_best_k_samples([str(i) for i in range(cfg.LOKI.NUM_WALKER)], [0 for i in range(cfg.LOKI.NUM_WALKER)], cur_iter=0, num_samples=cfg.LOKI.NUM_WALKER * 8, initialize=True)
         # Create vectorized envs
         # if cfg.PPO.CHECKPOINT_PATH and cfg.LOKI.INIT_DIR == "":
@@ -318,6 +322,10 @@ class LOKI:
                 #     'Reward', cur_rew, env_steps_done
                 # )
                 wandb.log({"Reward": cur_rew}, step=env_steps_done)
+            # Save elapsed time every iteration so resume doesn't lose much time
+            elapsed = time.time() - self.start
+            fu.save_json({"elapsed": elapsed}, os.path.join(cfg.OUT_DIR, "elapsed_time.json"))
+
             if (
                 cur_iter > 0
                 and cur_iter % cfg.LOG_PERIOD == 0
