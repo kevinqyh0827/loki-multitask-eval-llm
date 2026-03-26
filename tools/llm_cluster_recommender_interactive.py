@@ -63,6 +63,21 @@ def print_recommendations(parsed_json):
     if "key_transfer_insights" in parsed_json:
         print(f"\n  Key Insights: {parsed_json['key_transfer_insights']}")
 
+    if "most_similar_tasks" in parsed_json:
+        print(f"\n  Multi-Task Similarity:")
+        for mst in parsed_json["most_similar_tasks"]:
+            name = mst.get("task_name", "?")
+            score = mst.get("similarity_score", "?")
+            weight = mst.get("weight", "?")
+            print(f"    - {name}: score={score}, weight={weight}")
+            shared = mst.get("key_shared_demands", "")
+            if shared:
+                print(f"      Shared: {shared[:120]}")
+
+    if "multi_task_reasoning" in parsed_json:
+        reasoning = parsed_json["multi_task_reasoning"]
+        print(f"\n  Multi-Task Reasoning: {reasoning[:300]}{'...' if len(reasoning) > 300 else ''}")
+
     if "caveats" in parsed_json:
         print(f"\n  Caveats: {parsed_json['caveats']}")
 

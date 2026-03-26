@@ -358,9 +358,9 @@ def _cluster(args):
                 print(f"[{i+i}] Moved {move_count} files")
     
         # create tar files for each cluster
-        os.makedirs("data/", exist_ok=True)
+        os.makedirs(args.output_dir, exist_ok=True)
         for i in range(args.n_clusters):
-            with tarfile.open(f'data/latent_cluster{args.n_clusters}_{i}.tar', 'w') as cluster_i_tar:
+            with tarfile.open(f'{args.output_dir}/latent_cluster{args.n_clusters}_{i}.tar', 'w') as cluster_i_tar:
                 for file in cluster_tar_set[i]:
                     cluster_i_tar.addfile(file, tar.extractfile(file))
 
@@ -379,6 +379,7 @@ if __name__ == "__main__":
     parser.add_argument('--assign_cluster_wds', action='store_true', help='Assign cluster to existing webdataset.')
     parser.add_argument('--cluster_label', type=int, default=0, help='Cluster label.')
     parser.add_argument('--data_dir', type=str, help='Directory of the data to assign cluster.')
+    parser.add_argument('--output_dir', type=str, default='data', help='Output directory for cluster tar files (default: data).')
     args = parser.parse_args()
 
     # check cuda

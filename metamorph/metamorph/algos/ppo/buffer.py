@@ -18,7 +18,7 @@ class Buffer(object):
         else:
             self.obs = torch.zeros(T, P, *obs_space.shape)
         # print(f"act buffer shape: {act_shape}")
-        if cfg.ENV_TYPE == "push_box_incline":
+        if cfg.ENV.TASK == "push_box_incline":
             act_shape = (act_shape[0]+1,)
         self.act = torch.zeros(T, P, *act_shape)
         self.val = torch.zeros(T, P, 1)

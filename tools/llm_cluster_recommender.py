@@ -358,6 +358,13 @@ detailed physical reasoning for each.
 
 5. **Confidence and Caveats**: How confident are you? What could go wrong?
 
+6. **Multi-Task Similarity Synthesis**: Rank ALL known tasks by similarity to the new task. \
+Include up to 3 tasks with overall_similarity >= 0.3 in the `most_similar_tasks` array, \
+ordered by decreasing similarity. Assign a weight to each (proportional to similarity score, \
+normalized so weights sum to 1.0). Then provide `multi_task_reasoning` explaining how the \
+weighted combination of these similar tasks together predicts which cluster will perform best \
+on the new task. This multi-task reasoning should directly inform your cluster recommendations.
+
 **IMPORTANT**: Output your response as a JSON object with exactly this schema:
 ```json
 {
@@ -388,10 +395,24 @@ detailed physical reasoning for each.
     }
   ],
   "most_similar_task": "<locomotion|obstacle|incline>",
+  "most_similar_tasks": [
+    {
+      "task_name": "<locomotion|obstacle|incline>",
+      "similarity_score": "<float 0.0-1.0, from task_similarity above>",
+      "weight": "<float 0.0-1.0, proportional to similarity, all weights sum to 1.0>",
+      "key_shared_demands": "<1-2 sentences on shared physical requirements>",
+      "key_differences": "<1-2 sentences on key differences>"
+    }
+  ],
+  "multi_task_reasoning": "<How the combination of similar tasks together predicts cluster performance for the new task. Explain the weighted reasoning process.>",
   "key_transfer_insights": "What cross-task correlations informed your predictions...",
   "caveats": "Limitations and potential sources of error..."
 }
 ```
+
+**IMPORTANT**: Your JSON MUST include ALL of these top-level keys: task_similarity, \
+cross_task_analysis, physical_transfer_reasoning, recommendations, most_similar_tasks, \
+multi_task_reasoning, key_transfer_insights, caveats.
 
 Wrap the JSON in a markdown code block (```json ... ```). Before the JSON, you may include \
 your detailed reasoning as free text.""")
@@ -605,8 +626,27 @@ def main():
                     print(f"    Dimensions: {', '.join(dim_strs)}")
 
             most_similar = parsed_json.get("most_similar_task", "")
-            if most_similar:
+            if most_similar and "most_similar_tasks" not in parsed_json:
                 print(f"  => Most similar known task: {most_similar}")
+
+        # Multi-task similarity (new format)
+        if "most_similar_tasks" in parsed_json:
+            print("\nMulti-Task Similarity Ranking:")
+            for mst in parsed_json["most_similar_tasks"]:
+                name = mst.get("task_name", "?")
+                score = mst.get("similarity_score", "?")
+                weight = mst.get("weight", "?")
+                print(f"  {name}: score={score}, weight={weight}")
+                shared = mst.get("key_shared_demands", "")
+                if shared:
+                    print(f"    Shared: {shared[:150]}")
+                diff = mst.get("key_differences", "")
+                if diff:
+                    print(f"    Differs: {diff[:150]}")
+
+        if "multi_task_reasoning" in parsed_json:
+            reasoning = parsed_json["multi_task_reasoning"]
+            print(f"\nMulti-Task Reasoning:\n  {reasoning[:400]}{'...' if len(reasoning) > 400 else ''}")
 
         if "cross_task_analysis" in parsed_json:
             analysis = parsed_json["cross_task_analysis"]

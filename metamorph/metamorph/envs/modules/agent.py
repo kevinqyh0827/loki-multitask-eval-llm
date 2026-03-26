@@ -188,7 +188,7 @@ class Agent:
 
     def get_joint_obs(self, sim):
         obs = {}
-        if cfg.ENV_TYPE == "push_box_incline": 
+        if cfg.ENV.TASK == "push_box_incline":
             qpos = sim.data.qpos.flat[7:self.agent_qpos_idxs[-1]+1].copy()
             qvel = sim.data.qvel.flat[6:self.agent_qvel_idxs[-1]+1].copy()
             joint_range = sim.model.jnt_range[1:-1, :].copy()
@@ -208,7 +208,7 @@ class Agent:
         #############################
         # morphology
         #############################
-        if cfg.ENV_TYPE == "push_box_incline":
+        if cfg.ENV.TASK == "push_box_incline":
             obs["jnt_pos"] = sim.model.jnt_pos[1:-1, :].copy()
             obs["joint_axis"] = sim.model.jnt_axis[1:-1, :].copy()
             obs["armature"] = sim.model.dof_armature[6:self.agent_qvel_idxs[-1]+1].copy()[:, np.newaxis]

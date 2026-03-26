@@ -142,10 +142,18 @@ def xml_to_latent(xml_path, model, device):
 # Elite pool loading
 # =====================================================================
 
-def get_elite_xml_paths(cluster, task_dir):
-    """Get XML paths for all elite agents in a cluster/task."""
+def get_elite_xml_paths(cluster, task_dir, data_root=None):
+    """Get XML paths for all elite agents in a cluster/task.
+
+    Args:
+        data_root: Alternative root directory for loading data.
+            Default (None) uses metamorph/output/loki/.
+    """
+    if data_root is None:
+        data_root = os.path.join(_METAMORPH_DIR, "output", "loki")
+    data_root = os.path.abspath(data_root)
     xml_dir = os.path.join(
-        _METAMORPH_DIR, "output", "loki", task_dir, "kmeans_cluster", "20",
+        data_root, task_dir, "kmeans_cluster", "20",
         str(cluster), "walker20", "freq2", "drop2", f"seed{SEED}",
         "xml_step", "1218",
     )
@@ -158,18 +166,43 @@ def get_elite_xml_paths(cluster, task_dir):
     ]
 
 
-def get_elite_rewards(cluster, task_dir):
-    """Extract final rewards per agent from training logs."""
+def get_elite_rewards(cluster, task_dir, data_root=None):
+    """Extract final rewards per agent from training logs.
+
+    Args:
+        data_root: Alternative root directory for loading data.
+            Default (None) uses metamorph/output/loki/.
+    """
+    if data_root is None:
+        data_root = os.path.join(_METAMORPH_DIR, "output", "loki")
+    data_root = os.path.abspath(data_root)
     results_path = os.path.join(
-        _METAMORPH_DIR, "output", "loki", task_dir, "kmeans_cluster", "20",
+        data_root, task_dir, "kmeans_cluster", "20",
         str(cluster), "walker20", "freq2", "drop2", f"seed{SEED}",
         "Unimal-v0_results.json",
     )
     if not os.path.isfile(results_path):
         return {}
+    # Try proper JSON parsing first, fall back to regex for truncated files
+    try:
+        with open(results_path) as f:
+            data = json.load(f)
+        rewards = {}
+        for key, val in data.items():
+            if key.startswith("_") or key == "fps":
+                continue
+            try:
+                r_list = val["reward"]["reward"]
+                if r_list:
+                    rewards[key] = r_list[-1]
+            except (KeyError, TypeError, IndexError):
+                continue
+        return rewards
+    except (json.JSONDecodeError, Exception):
+        pass
+    # Fallback: regex for truncated files
     with open(results_path) as f:
         text = f.read()
-    # Extract reward arrays via regex (files may be truncated)
     pattern = r'"(\d+)":\s*\{\s*"reward":\s*\{\s*"reward":\s*\[([\d.,\s\n]+?)\]'
     matches = re.findall(pattern, text)
     rewards = {}
@@ -180,14 +213,18 @@ def get_elite_rewards(cluster, task_dir):
     return rewards
 
 
-def load_task_elite_pool(cluster, task_name, model, device):
+def load_task_elite_pool(cluster, task_name, model, device, data_root=None):
     """Load elite agents from a single (cluster, task) pair.
 
     Returns list of dicts: {agent_id, task, xml_path, z, vec, reward}
+
+    Args:
+        data_root: Alternative root directory for loading data.
+            Default (None) uses metamorph/output/loki/.
     """
     task_dir = TASK_DIRS[task_name]
-    xml_paths = get_elite_xml_paths(cluster, task_dir)
-    rewards = get_elite_rewards(cluster, task_dir)
+    xml_paths = get_elite_xml_paths(cluster, task_dir, data_root)
+    rewards = get_elite_rewards(cluster, task_dir, data_root)
 
     pool = []
     for xml_path in xml_paths:
@@ -440,6 +477,14 @@ def load_recommendation(new_task, project_root):
     # Extract most similar task from recommendation
     most_similar = parsed.get("most_similar_task", None)
 
+    # Try new format first: most_similar_tasks array (highest weight)
+    if not most_similar and "most_similar_tasks" in parsed:
+        mst_list = parsed["most_similar_tasks"]
+        if mst_list:
+            # Pick the one with highest weight (or first if no weight)
+            best_mst = max(mst_list, key=lambda t: t.get("weight", t.get("similarity_score", 0)))
+            most_similar = best_mst.get("task_name")
+
     # Fallback: check task_similarity scores if available
     if not most_similar and "task_similarity" in parsed:
         ts_list = parsed["task_similarity"]
@@ -481,6 +526,8 @@ def main():
     parser.add_argument("--height", type=int, default=300)
     parser.add_argument("--output_dir", type=str, default=OUTPUT_DIR)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--data_root", type=str, default=None,
+                        help="Alternative data root (default: metamorph/output/loki)")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -523,7 +570,8 @@ def main():
 
     # ---- Step 3: Load elite pool from (best_cluster, most_similar_task) ----
     print(f"\nLoading elite pool: Cluster {best_cluster} x {most_similar_task}...")
-    pool = load_task_elite_pool(best_cluster, most_similar_task, model, device)
+    pool = load_task_elite_pool(best_cluster, most_similar_task, model, device,
+                                data_root=args.data_root)
     print(f"  Encoded {len(pool)} elite agents")
 
     # Summarize rewards

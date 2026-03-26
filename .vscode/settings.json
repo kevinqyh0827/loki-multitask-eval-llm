@@ -1,5 +1,17 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    "files.watcherExclude": {
+        "**/webdataset/**": true,
+        "**/results/**": true,
+        "**/metamorph/output/**": true,
+        "**/metamorph/wandb/**": true,
+        "**/wandb/**": true,
+        "**/log/**": true,
+        "**/__pycache__/**": true,
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true,
+        "**/*.egg-info/**": true
+    }
 }

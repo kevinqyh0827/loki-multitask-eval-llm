@@ -465,6 +465,7 @@ def main():
     
     parser.add_argument('--wds', action='store_true', help='Use webdataset.')
     parser.add_argument('--save_latent', action='store_true', help='Save the latent vectors.')
+    parser.add_argument('--dataset_size', type=str, default='50k', help='Dataset size label for checkpoint naming (e.g. 50k, 500k).')
     parser.add_argument('--gpu', type=int, default=1, help='GPU index.')
     parser.add_argument('--max_beta', type=float, default=1e-2, help='Initial Beta.')
     parser.add_argument('--min_beta', type=float, default=1e-5, help='Minimum Beta.')
@@ -495,7 +496,7 @@ def main():
     
     from datetime import datetime
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    args.ckpt_dir = f"VAE_50k_hdim{args.h_dim}_depth{args.d_depth}_LR_{args.lr}_WD_{args.wd}_L{args.n_layer}_H{args.n_head}_F{args.factor}_beta{args.max_beta}_bsize{args.batch_size}_epochs{args.epochs}_{date_str}"
+    args.ckpt_dir = f"VAE_{args.dataset_size}_hdim{args.h_dim}_depth{args.d_depth}_LR_{args.lr}_WD_{args.wd}_L{args.n_layer}_H{args.n_head}_F{args.factor}_beta{args.max_beta}_bsize{args.batch_size}_epochs{args.epochs}_{date_str}"
     wandb.init(project="VAE", name=args.ckpt_dir)
 
     if args.save_latent:
