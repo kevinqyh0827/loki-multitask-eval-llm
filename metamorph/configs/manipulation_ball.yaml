@@ -1,0 +1,17 @@
+RNG_SEED: 1409
+ENV:
+  MODULES: ["Agent", "Terrain", "Objects"]
+  FORWARD_REWARD_WEIGHT: 0.0
+  TASK: "manipulation"
+  KEYS_TO_KEEP: ["proprioceptive", "goal", "obj"]
+  WRAPPERS: ["ReachReward"]
+TERRAIN:
+  SIZE: [15, 15, 1]
+  START_FLAT: 2
+  CENTER_FLAT: 0
+  FLAT_LENGTH_RANGE: [15, 15, 1]
+  BOUNDARY_WALLS: True
+OBJECT:
+  BOX_SIDE: 0.20
+  BALL_RADIUS: 0.20
+  TYPE: "ball"

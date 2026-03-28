@@ -152,7 +152,8 @@ def main():
     stagger = random.uniform(0, 30)
     print(f"[WANDB] Staggering init by {stagger:.0f}s", flush=True)
     time.sleep(stagger)
-    project = "LOKI" if cfg.LOKI.TRAIN else "LOKI-eval"
+    default_project = "LOKI" if cfg.LOKI.TRAIN else "LOKI-eval"
+    project = os.environ.get("WANDB_PROJECT", default_project)
     wandb_mode = os.environ.get("WANDB_MODE", "online")
     print(f"[WANDB] Initializing mode={wandb_mode}, project={project}, run_id={wandb_run_id or 'auto'}", flush=True)
 

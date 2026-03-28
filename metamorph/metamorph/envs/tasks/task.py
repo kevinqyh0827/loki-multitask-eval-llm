@@ -6,6 +6,9 @@ from metamorph.envs.tasks.obstacle import make_env_obstacle
 from metamorph.envs.tasks.push_box_incline import make_env_push_box_incline
 from metamorph.envs.tasks.incline import make_env_incline
 from metamorph.envs.tasks.bump import make_env_bump
+from metamorph.envs.tasks.exploration import make_env_exploration
+from metamorph.envs.tasks.patrol import make_env_patrol
+from metamorph.envs.tasks.manipulation import make_env_manipulation
 from metamorph.envs.wrappers.select_keys import SelectKeysWrapper
 from metamorph.utils import file as fu
 

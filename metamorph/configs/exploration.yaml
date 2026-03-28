@@ -1,0 +1,13 @@
+RNG_SEED: 1409
+ENV:
+  MODULES: ["Agent", "Terrain", "Objects"]
+  FORWARD_REWARD_WEIGHT: 0.0
+  TASK: "exploration"
+  KEYS_TO_KEEP: ["proprioceptive"]
+TERRAIN:
+  SIZE: [50, 50, 1]
+  START_FLAT: 0
+  CENTER_FLAT: 50
+  FLAT_LENGTH_RANGE: [50, 50, 1]
+  HFIELD_LENGTH_RANGE: [50, 50, 1]
+  BOUNDARY_WALLS: True

@@ -78,7 +78,7 @@ class LOKI:
         print(f"Cluster label: {cfg.LOKI.CLUSTER_LABEL} / {cfg.LOKI.NUM_CLUSTERS}")
 
         # load cluster unimals
-        self.cluster_tar_path = f"../data/latent_cluster{cfg.LOKI.NUM_CLUSTERS}_{cfg.LOKI.CLUSTER_LABEL}.tar"
+        self.cluster_tar_path = f"../{cfg.LOKI.CLUSTER_DATA_DIR}/latent_cluster{cfg.LOKI.NUM_CLUSTERS}_{cfg.LOKI.CLUSTER_LABEL}.tar"
         self.cluster_unimals_pkl_strings = []
         self.cluster_unimals_xml_strings = []
         with tarfile.open(self.cluster_tar_path, "r") as tar:

@@ -433,6 +433,11 @@ _C.LOKI.NUM_BEST_DROP_WALKER = 8
 
 _C.LOKI.MUTATE_SAMPLE_SIZE = 4
 
+# Directory containing cluster tar files (relative to metamorph/).
+# Default "data" = ../data/latent_cluster*.tar (50K clusters).
+# Set to "data_500k" for 500K clusters.
+_C.LOKI.CLUSTER_DATA_DIR = "data"
+
 # --------------------------------------------------------------------------- #
 # Task sampling options
 # --------------------------------------------------------------------------- #
