@@ -85,7 +85,7 @@ CKPT_PATH="./output/loki_500k/$ENV_TYPE/kmeans_cluster/$NUM_CLUSTERS/$CLUSTER_LA
 
 # ========== 500K-specific paths ==========
 # VAE checkpoint trained on 500K data (update the timestamp once training finishes)
-VAE_PATH="${VAE_500K_CKPT:-VAE_500k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_epochs200}"
+VAE_PATH="${VAE_500K_CKPT:-VAE_500k_hdim32_depth32_LR_0.0001_WD_1e-05_L4_H4_F8_beta0.01_bsize4096_epochs200_20260325_224434}"
 
 # Cluster data directory for 500K
 CLUSTER_DATA_DIR="data_500k"
