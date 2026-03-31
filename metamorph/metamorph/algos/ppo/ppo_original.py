@@ -20,6 +20,7 @@ from .envs import get_ob_rms
 from .envs import make_vec_envs
 from .envs import set_ob_rms
 from .inherit_weight import restore_from_checkpoint
+from .mlp_model import MLPActorCritic
 from .model import ActorCritic
 from .model import Agent
 

@@ -17,7 +17,7 @@ LOG_FILE="$LOG_PATH/cluster${NUM_CLUSTERS}_idx${CLUSTER_LABEL}_walker${NUM_WALKE
 
 CKPT_PATH="./output/loki/ft/kmeans_cluster/$NUM_CLUSTERS/$CLUSTER_LABEL/walker$NUM_WALKER/freq$DROP_FREQ/drop$NUM_DROP/seed$RNG_SEED"
 SAVE_PATH="./output/loki/$ENV_NAME/kmeans_cluster/$NUM_CLUSTERS/$CLUSTER_LABEL/walker$NUM_WALKER/freq$DROP_FREQ/drop$NUM_DROP/seed$RNG_SEED"
-XML_PATH="$CKPT_PATH/xml_step/14" # TODO: 1218
+XML_PATH="$CKPT_PATH/xml_step/1218"
 
 WALKER_PATH="$CKPT_PATH/xml_step"
 mkdir -p metamorph/$WALKER_PATH/xml
