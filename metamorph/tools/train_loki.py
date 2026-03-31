@@ -173,9 +173,14 @@ def main():
                 time.sleep(wait)
             else:
                 print(f"[WANDB] Init failed after {max_retries} attempts, falling back to offline: {e}", flush=True)
-                wandb.init(project=project, name=cfg.OUT_DIR, mode="offline",
-                           settings=wandb_settings, **wandb_kwargs)
-    print(f"[WANDB] Ready — mode={wandb.run.settings.mode}, url={wandb.run.get_url() or 'offline'}", flush=True)
+                try:
+                    offline_settings = wandb.Settings(init_timeout=120)
+                    wandb.init(project=project, name=cfg.OUT_DIR, mode="offline",
+                               settings=offline_settings, **wandb_kwargs)
+                except Exception as e2:
+                    print(f"[WANDB] Offline init also failed: {e2}. Disabling wandb entirely.", flush=True)
+                    wandb.init(mode="disabled")
+    print(f"[WANDB] Ready — mode={wandb.run.settings.mode}, url={getattr(wandb.run, 'url', None) or 'offline/disabled'}", flush=True)
     # Save the config
     dump_cfg()
     loki_train(args, train=cfg.LOKI.TRAIN)

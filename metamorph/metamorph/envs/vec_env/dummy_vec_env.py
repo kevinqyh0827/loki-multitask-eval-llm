@@ -28,8 +28,20 @@ class DummyVecEnv(VecEnv):
         obs_space = env.observation_space
         self.keys, shapes, dtypes = obs_space_info(obs_space)
 
+        # Find the max observation shape across all envs to handle heterogeneous
+        # morphologies (different limb counts → different obs dimensions).
+        max_shapes = dict(shapes)
+        for e_env in self.envs[1:]:
+            _, e_shapes, _ = obs_space_info(e_env.observation_space)
+            for k in self.keys:
+                if k in e_shapes:
+                    max_shapes[k] = tuple(
+                        max(a, b) for a, b in zip(max_shapes[k], e_shapes[k])
+                    )
+
+        self._max_shapes = max_shapes
         self.buf_obs = {
-            k: np.zeros((self.num_envs,) + tuple(shapes[k]), dtype=dtypes[k])
+            k: np.zeros((self.num_envs,) + tuple(max_shapes[k]), dtype=dtypes[k])
             for k in self.keys
         }
         self.buf_dones = np.zeros((self.num_envs,), dtype=np.bool)
@@ -86,10 +98,14 @@ class DummyVecEnv(VecEnv):
 
     def _save_obs(self, e, obs):
         for k in self.keys:
-            if k is None:
-                self.buf_obs[k][e] = obs
+            val = obs if k is None else obs[k]
+            buf = self.buf_obs[k][e]
+            if val.shape == buf.shape:
+                buf[:] = val
             else:
-                self.buf_obs[k][e] = obs[k]
+                # Zero-pad: morphologies with fewer limbs produce smaller obs
+                buf[:] = 0
+                buf[tuple(slice(0, s) for s in val.shape)] = val
 
     def _obs_from_buf(self):
         return dict_to_obs(copy_obs_dict(self.buf_obs))
