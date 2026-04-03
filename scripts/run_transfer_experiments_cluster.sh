@@ -12,29 +12,25 @@
 # Direct execution (interactive node):
 #   bash scripts/run_transfer_experiments_cluster.sh [num_gpus] [max_concurrent_per_gpu]
 #
-# GPU recommendations:
-#   - 1x A100-40GB:  max ~4 concurrent fine-tune jobs  (~24 hrs total)
-#   - 2x A100-40GB:  max ~8 concurrent               (~12 hrs total)
-#   - 1x A100-80GB:  max ~8 concurrent                (~12 hrs total)
-#   - 4x A100-40GB:  max ~16 concurrent               (~6 hrs total)
-#   - 1x H200-141GB: max ~12 concurrent               (~8 hrs total)
+# GPU recommendations (each fine-tune job uses ~2-3 GB VRAM, source training ~8-10 GB):
 #
-# Each fine-tune/scratch job uses ~2-3 GB VRAM (single morphology PPO).
-# Source training (100M steps) uses ~8-10 GB VRAM.
+#   GPUs requested    Phase 0 (source)    Phase 2 (90 jobs)    Total
+#   ─────────────     ────────────────    ─────────────────    ─────
+#   1x H200-141GB     ~20 hrs (sequential) ~3 hrs              ~23 hrs
+#   2x H200-141GB     ~10 hrs (parallel)   ~1.5 hrs            ~12 hrs  ← recommended
+#   1x A100-80GB      ~20 hrs              ~3 hrs              ~23 hrs
+#   2x A100-80GB      ~10 hrs (parallel)   ~1.5 hrs            ~12 hrs
 #
-# Phase 0: Source policy training (push_box_incline + bump, 100M steps each)
-#          Runs sequentially on 1 GPU — ~10 hrs each, ~20 hrs total
-# Phase 1: Zero-shot evaluation (~5 min)
-# Phase 2: Budget sweep — 5 conditions x 6 budgets x 3 seeds = 90 jobs
-#          Most jobs (1M-10M budgets) finish in <30 min
-#          50M budget jobs take ~2-3 hrs each
+# With 2 GPUs, Phase 0 runs both source tasks IN PARALLEL (one per GPU),
+# cutting source training time in half. Phase 2 distributes 90 small jobs
+# across both GPUs with round-robin scheduling.
 
 #SBATCH --job-name=loki-transfer
 #SBATCH --partition=work1
-#SBATCH --gres=gpu:2
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=128G
-#SBATCH --time=3-00:00:00
+#SBATCH --gres=gpu:h200:2
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
+#SBATCH --time=1-00:00:00
 #SBATCH --output=log/slurm/transfer-%j.out
 #SBATCH --error=log/slurm/transfer-%j.err
 
@@ -197,23 +193,38 @@ echo "================================================================"
 echo "PHASE 0: Source policy training"
 echo "================================================================"
 
-# Train on GPU 0 (sequential — these are heavy 100M step runs)
+# With multiple GPUs, run both source training jobs in PARALLEL on separate GPUs.
+# Each job uses ~8-10 GB VRAM, so even A100-40GB can handle one per GPU.
+# With 1 GPU, they run sequentially.
+
+PHASE0_PIDS=()
+
 if [ ! -f "metamorph/${PBI_SOURCE_DIR}/Unimal-v0_results.json" ]; then
-    echo "Training push_box_incline source policy (100M steps)..."
+    echo "Training push_box_incline source policy (100M steps) on GPU 0..."
     CUDA_VISIBLE_DEVICES=0 bash scripts/run_source_training.sh push_box_incline \
-        "$MORPH_XML_DIR" 1e8 3429
-    echo "push_box_incline source training done."
+        "$MORPH_XML_DIR" 1e8 3429 &
+    PHASE0_PIDS+=($!)
 else
     echo "push_box_incline source policy already exists."
 fi
 
 if [ ! -f "metamorph/${BUMP_SOURCE_DIR}/Unimal-v0_results.json" ]; then
-    echo "Training bump source policy (100M steps)..."
-    CUDA_VISIBLE_DEVICES=0 bash scripts/run_source_training.sh bump \
-        "$MORPH_XML_DIR" 1e8 3429
-    echo "bump source training done."
+    # Use GPU 1 if available, otherwise GPU 0 (will run after push_box_incline finishes)
+    BUMP_GPU=$(( NUM_GPUS > 1 ? 1 : 0 ))
+    echo "Training bump source policy (100M steps) on GPU ${BUMP_GPU}..."
+    CUDA_VISIBLE_DEVICES=$BUMP_GPU bash scripts/run_source_training.sh bump \
+        "$MORPH_XML_DIR" 1e8 3429 &
+    PHASE0_PIDS+=($!)
 else
     echo "bump source policy already exists."
+fi
+
+# Wait for all Phase 0 jobs to complete
+if [ ${#PHASE0_PIDS[@]} -gt 0 ]; then
+    echo "Waiting for ${#PHASE0_PIDS[@]} source training job(s)..."
+    for pid in "${PHASE0_PIDS[@]}"; do
+        wait "$pid"
+    done
 fi
 
 echo "Phase 0 complete."

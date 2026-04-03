@@ -141,13 +141,24 @@ else
     TASK_ARGS="ENV_TYPE ${TARGET_TASK}"
 fi
 
+# Verify XMLs were copied successfully
+XML_COUNT=$(ls "metamorph/${WALKER_PATH}/xml/"*.xml 2>/dev/null | wc -l)
+if [ "$XML_COUNT" -eq 0 ]; then
+    echo "Error: No XML files found in metamorph/${WALKER_PATH}/xml/"
+    echo "SRC_XML_DIR was: ${SRC_XML_DIR}"
+    exit 1
+fi
+echo "Walker dir ready: ${XML_COUNT} XMLs"
+
 # Build common config overrides
+# Use DummyVecEnv to avoid SubprocVecEnv fork OOM crashes (see CLAUDE.md pitfalls)
 COMMON_ARGS="LOKI.TRAIN True \
     OUT_DIR ${OUT_DIR} \
     ENV.WALKER_DIR ${WALKER_PATH} \
     PPO.MAX_STATE_ACTION_PAIRS ${BUDGET} \
     RNG_SEED ${SEED} \
     MODEL.ACTOR_CRITIC ${MODEL_TYPE} \
+    VECENV.TYPE DummyVecEnv \
     ${TASK_ARGS}"
 
 # Add fine-tune specific args

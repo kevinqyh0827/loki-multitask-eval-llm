@@ -72,7 +72,14 @@ for xml_file in "${SRC_XML_DIR}"/[0-9]*.xml; do
         cp "$xml_file" "metamorph/${WALKER_PATH}/xml_step/0/"
     fi
 done
-echo "Copied $(ls "metamorph/${WALKER_PATH}/xml/"*.xml 2>/dev/null | wc -l) walker XMLs"
+# Verify XMLs were copied successfully
+XML_COUNT=$(ls "metamorph/${WALKER_PATH}/xml/"*.xml 2>/dev/null | wc -l)
+if [ "$XML_COUNT" -eq 0 ]; then
+    echo "Error: No XML files found in metamorph/${WALKER_PATH}/xml/"
+    echo "SRC_XML_DIR was: ${SRC_XML_DIR}"
+    exit 1
+fi
+echo "Copied ${XML_COUNT} walker XMLs"
 
 cd metamorph
 
@@ -94,6 +101,7 @@ echo "Starting source policy training on ${SOURCE_TASK}..."
 echo "This may take several hours for 100M steps."
 
 # Train PPO from scratch
+# Use DummyVecEnv to avoid SubprocVecEnv fork OOM crashes (see CLAUDE.md pitfalls)
 MUJOCO_GL=egl PYTHONPATH=./ python tools/train_ppo.py \
     --cfg "$CFG_FILE" \
     LOKI.TRAIN True \
@@ -101,6 +109,7 @@ MUJOCO_GL=egl PYTHONPATH=./ python tools/train_ppo.py \
     ENV.WALKER_DIR "${WALKER_PATH}" \
     PPO.MAX_STATE_ACTION_PAIRS "${BUDGET}" \
     RNG_SEED "${SEED}" \
+    VECENV.TYPE DummyVecEnv \
     ${TASK_ARGS} \
     > "$LOG_FILE" 2>&1
 
