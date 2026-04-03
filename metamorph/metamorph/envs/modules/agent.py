@@ -188,7 +188,9 @@ class Agent:
 
     def get_joint_obs(self, sim):
         obs = {}
-        if cfg.ENV.TASK == "push_box_incline":
+        # Tasks with objects (box/ball) add extra joints to the sim.
+        # Filter to agent-only joints to avoid shape mismatch.
+        if cfg.ENV.TASK in ["push_box_incline", "manipulation"]:
             qpos = sim.data.qpos.flat[7:self.agent_qpos_idxs[-1]+1].copy()
             qvel = sim.data.qvel.flat[6:self.agent_qvel_idxs[-1]+1].copy()
             joint_range = sim.model.jnt_range[1:-1, :].copy()
@@ -196,7 +198,7 @@ class Agent:
             qpos = sim.data.qpos.flat[7:].copy()
             qvel = sim.data.qvel.flat[6:].copy()
             joint_range = sim.model.jnt_range[1:, :].copy()
-        
+
         # print(joint_range[:, 0].shape, joint_range[:, 1].shape)
         qpos = (qpos - joint_range[:, 0]) / (joint_range[:, 1] - joint_range[:, 0])
 
@@ -208,7 +210,7 @@ class Agent:
         #############################
         # morphology
         #############################
-        if cfg.ENV.TASK == "push_box_incline":
+        if cfg.ENV.TASK in ["push_box_incline", "manipulation"]:
             obs["jnt_pos"] = sim.model.jnt_pos[1:-1, :].copy()
             obs["joint_axis"] = sim.model.jnt_axis[1:-1, :].copy()
             obs["armature"] = sim.model.dof_armature[6:self.agent_qvel_idxs[-1]+1].copy()[:, np.newaxis]
