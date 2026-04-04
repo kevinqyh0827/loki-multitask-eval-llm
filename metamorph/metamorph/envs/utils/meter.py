@@ -145,9 +145,15 @@ class TrainMeter:
         for rew_type in rew_types:
             rew_list = []
             for _, agent_meter in self.agent_meters.items():
+                # After morphology replacement, a re-initialized agent may not
+                # yet have all reward types (e.g. conditional __reward__success).
+                # Skip agents with missing types instead of crashing.
+                if len(agent_meter.mean_ep_rews[rew_type]) == 0:
+                    continue
                 rew_list.append(agent_meter.mean_ep_rews[rew_type][-1])
 
-            self.mean_ep_rews[rew_type].append(round(np.mean(rew_list), 2))
+            if rew_list:
+                self.mean_ep_rews[rew_type].append(round(np.mean(rew_list), 2))
 
     def log_stats(self):
         for _, agent_meter in self.agent_meters.items():
