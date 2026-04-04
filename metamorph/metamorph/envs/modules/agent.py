@@ -105,9 +105,17 @@ class Agent:
         ]
         self.edges = self._get_edges(sim)
         env.metadata["num_limbs"] = len(self.agent_body_idxs)
-        env.metadata["num_joints"] = sim.model.njnt - 1
+        # Tasks with objects (box/ball) add an extra free joint to the sim.
+        # Exclude it from num_joints and edge_name to keep agent-only counts.
+        if cfg.ENV.TASK in ["push_box_incline", "manipulation"]:
+            env.metadata["num_joints"] = sim.model.njnt - 2
+        else:
+            env.metadata["num_joints"] = sim.model.njnt - 1
         # Useful for attention map analysis
-        env.metadata["edge_name"] = [sim.model.joint(i).name for i in range(1, sim.model.njnt)]
+        if cfg.ENV.TASK in ["push_box_incline", "manipulation"]:
+            env.metadata["edge_name"] = [sim.model.joint(i).name for i in range(1, sim.model.njnt - 1)]
+        else:
+            env.metadata["edge_name"] = [sim.model.joint(i).name for i in range(1, sim.model.njnt)]
         env.metadata["limb_name"] = [
             sim.model.body(idx).name for idx in self.agent_body_idxs
         ]
@@ -145,7 +153,11 @@ class Agent:
         body_parentids = sim.model.body_parentid.copy()
         # body idx of the child
         body_idxs = self.agent_body_idxs
-        joint_to = sim.model.jnt_bodyid[1:].copy()  # ignore root
+        # Exclude root joint; also exclude object joint for tasks with objects.
+        if cfg.ENV.TASK in ["push_box_incline", "manipulation"]:
+            joint_to = sim.model.jnt_bodyid[1:-1].copy()
+        else:
+            joint_to = sim.model.jnt_bodyid[1:].copy()
         # body idx of the parent
         joint_from = np.asarray([body_parentids[child] for child in joint_to])
         # subtract 1 from idx as idx correspond to list with first elem
