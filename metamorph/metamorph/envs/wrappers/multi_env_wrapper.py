@@ -193,8 +193,12 @@ class MultiUnimalNodeCentricObservation(gym.ObservationWrapper):
 
         dummy_obs["obs_padding_mask"] = dummy_padding_mask
         dummy_obs["act_padding_mask"] = dummy_act_padding_mask
-        if "hfield" in self.observation_space.spaces:
-            dummy_obs["hfield"] = np.zeros(self.observation_space["hfield"].shape)
+        # Zero-fill any extra observation keys (e.g. "hfield", "goal", "obj")
+        # so that tasks with non-standard obs keys don't crash during
+        # morphology replacement (reset_one_unimal → get_dummy_obs path).
+        for key, space in self.observation_space.spaces.items():
+            if key not in dummy_obs:
+                dummy_obs[key] = np.zeros(space.shape, dtype=space.dtype)
 
         return dummy_obs
 

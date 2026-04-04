@@ -84,6 +84,20 @@ def _make_raw_env(xml_file=None, tmp_sample=False):
 def _wrap_env(env, env_id):
     """Add TimeLimit, TimeLimitMask, and RecordEpisodeStatistics wrappers."""
     max_steps = _ENV_MAX_STEPS.get(env_id, 1000)
+    # Propagate spec through the inner wrapper chain so metric wrappers
+    # (ManipulationMetric, PatrolMetric, etc.) can access max_episode_steps.
+    # These wrappers sit below OldTimeLimit and need spec to detect episode end.
+    # Gymnasium 1.x makes Wrapper.spec a read-only property that reads from
+    # the inner env, so we set _cached_spec on wrappers and spec on base envs.
+    from types import SimpleNamespace
+    spec = SimpleNamespace(id=env_id, max_episode_steps=max_steps)
+    e = env
+    while e is not None:
+        if isinstance(e, gym.Wrapper):
+            e._cached_spec = spec
+        else:
+            e.spec = spec
+        e = getattr(e, 'env', None)
     env = OldTimeLimit(env, max_episode_steps=max_steps)
     env = TimeLimitMask(env)
     env = RecordEpisodeStatistics(env)

@@ -17,13 +17,13 @@
 # ============================================================
 
 # Tasks to evaluate (pick from: locomotion obstacle many_obstacle bump incline push_box_incline exploration patrol manipulation_ball)
-TASKS=(locomotion obstacle bump)
+TASKS=(manipulation_ball)
 
 # Clusters to evaluate (0-39 for 40 clusters; adjust range as needed)
-CLUSTERS=($(seq 0 39))
+CLUSTERS=($(seq 0 5))
 
 # Max concurrent jobs on a single GPU (adjust by GPU VRAM)
-MAX_CONCURRENT_PER_GPU=4
+MAX_CONCURRENT_PER_GPU=6
 
 # Stagger time between launches (seconds)
 STAGGER_TIME=300
