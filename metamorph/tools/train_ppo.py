@@ -1,6 +1,9 @@
 import argparse
+import hashlib
 import os
+import random
 import sys
+import time
 
 import torch
 import wandb
@@ -136,7 +139,54 @@ def main():
     set_cfg_options()
     os.makedirs(cfg.OUT_DIR, exist_ok=True)
 
-    wandb.init(project="LOKI", name=cfg.OUT_DIR)
+    # Initialize wandb with deterministic run ID for resume support.
+    # Derive a unique, stable run ID from OUT_DIR so that:
+    #   - each condition/budget/seed combo gets its own run
+    #   - crashed jobs resume the same run instead of creating duplicates
+    wandb_kwargs = {}
+    wandb_run_id = os.environ.get("WANDB_RUN_ID")
+    if not wandb_run_id:
+        # Generate deterministic 8-char ID from the output directory path
+        wandb_run_id = hashlib.md5(cfg.OUT_DIR.encode()).hexdigest()[:8]
+    wandb_kwargs["id"] = wandb_run_id
+    wandb_kwargs["resume"] = "allow"
+
+    # Stagger concurrent wandb.init() calls to avoid API rate limits on HPC
+    stagger = random.uniform(0, 30)
+    print(f"[WANDB] Staggering init by {stagger:.0f}s", flush=True)
+    time.sleep(stagger)
+
+    project = os.environ.get("WANDB_PROJECT", "LOKI-transfer")
+    wandb_mode = os.environ.get("WANDB_MODE", "online")
+    print(f"[WANDB] Initializing mode={wandb_mode}, project={project}, "
+          f"run_id={wandb_run_id}, name={cfg.OUT_DIR}", flush=True)
+
+    wandb_settings = wandb.Settings(init_timeout=60)
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            wandb.init(project=project, name=cfg.OUT_DIR, mode=wandb_mode,
+                       settings=wandb_settings, **wandb_kwargs)
+            break
+        except Exception as e:
+            if attempt < max_retries:
+                wait = 15 * attempt + random.uniform(0, 10)
+                print(f"[WANDB] Init failed (attempt {attempt}/{max_retries}): {e}. "
+                      f"Retrying in {wait:.0f}s...", flush=True)
+                time.sleep(wait)
+            else:
+                print(f"[WANDB] Init failed after {max_retries} attempts, "
+                      f"falling back to offline: {e}", flush=True)
+                try:
+                    offline_settings = wandb.Settings(init_timeout=120)
+                    wandb.init(project=project, name=cfg.OUT_DIR, mode="offline",
+                               settings=offline_settings, **wandb_kwargs)
+                except Exception as e2:
+                    print(f"[WANDB] Offline init also failed: {e2}. "
+                          f"Disabling wandb entirely.", flush=True)
+                    wandb.init(mode="disabled")
+    print(f"[WANDB] Ready — mode={wandb.run.settings.mode}, "
+          f"url={getattr(wandb.run, 'url', None) or 'offline/disabled'}", flush=True)
 
     # Save the config
     dump_cfg()

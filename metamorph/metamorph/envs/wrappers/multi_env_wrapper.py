@@ -211,9 +211,13 @@ class MultiUnimalNodeCentricAction(gym.ActionWrapper):
         self._update_action_space()
 
     def _update_action_space(self):
-        num_joints = self.metadata["num_joints"]
-        num_pads = self.max_limbs * 2 - num_joints
         low, high = self.action_space.low, self.action_space.high
+        # Pad action space to fixed size MAX_LIMBS * 2.
+        # Use the actual action space dimension (= number of MuJoCo actuators)
+        # rather than metadata["num_joints"], because UNIMAL morphologies can
+        # have passive joints (no actuator) making njnt != nu.
+        num_actuators = low.shape[0]
+        num_pads = self.max_limbs * 2 - num_actuators
         low = np.concatenate([low, [-1] * num_pads]).astype(np.float32)
         high = np.concatenate([high, [-1] * num_pads]).astype(np.float32)
         self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)

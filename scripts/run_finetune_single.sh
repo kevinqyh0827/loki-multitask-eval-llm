@@ -130,6 +130,16 @@ if [ -n "$SOURCE_CKPT" ]; then
     fi
 fi
 
+# Verify XMLs were copied successfully (must be done BEFORE cd metamorph,
+# since files were copied to metamorph/${WALKER_PATH} from the repo root)
+XML_COUNT=$(ls "metamorph/${WALKER_PATH}/xml/"*.xml 2>/dev/null | wc -l)
+if [ "$XML_COUNT" -eq 0 ]; then
+    echo "Error: No XML files found in metamorph/${WALKER_PATH}/xml/"
+    echo "SRC_XML_DIR was: ${SRC_XML_DIR}"
+    exit 1
+fi
+echo "Walker dir ready: ${XML_COUNT} XMLs"
+
 cd metamorph
 
 # Determine config file and extra args for target task
@@ -140,15 +150,6 @@ else
     CFG_FILE="./configs/${TARGET_TASK}.yaml"
     TASK_ARGS="ENV_TYPE ${TARGET_TASK}"
 fi
-
-# Verify XMLs were copied successfully
-XML_COUNT=$(ls "metamorph/${WALKER_PATH}/xml/"*.xml 2>/dev/null | wc -l)
-if [ "$XML_COUNT" -eq 0 ]; then
-    echo "Error: No XML files found in metamorph/${WALKER_PATH}/xml/"
-    echo "SRC_XML_DIR was: ${SRC_XML_DIR}"
-    exit 1
-fi
-echo "Walker dir ready: ${XML_COUNT} XMLs"
 
 # Build common config overrides
 # Use DummyVecEnv to avoid SubprocVecEnv fork OOM crashes (see CLAUDE.md pitfalls)
@@ -169,8 +170,13 @@ else
     FINETUNE_ARGS=""
 fi
 
-# Create log directory
-LOG_DIR="../log/transfer/${MODE}"
+# Create log directory — include source name for finetune mode to avoid
+# log collision when multiple finetune sources run concurrently
+if [ "$MODE" = "finetune" ] && [ -n "$SOURCE_NAME" ]; then
+    LOG_DIR="../log/transfer/${MODE}_from_${SOURCE_NAME}"
+else
+    LOG_DIR="../log/transfer/${MODE}"
+fi
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/${TARGET_TASK}_budget${BUDGET}_seed${SEED}.log"
 

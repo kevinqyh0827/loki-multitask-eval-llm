@@ -219,6 +219,9 @@ class LOKI:
         obs = self.envs.reset()
         self.buffer.to(self.device)
         self.start = time.time()
+        # Session start is always wall-clock now — used for ETA/iter-time
+        # calculations (not affected by cumulative elapsed adjustment).
+        self.session_start = self.start
 
         # On resume, shift start time backward by previously elapsed time so that
         # elapsed_hours and FPS are cumulative across runs.
@@ -643,15 +646,18 @@ class LOKI:
     def _log_fps(self, cur_iter, log=True):
         env_steps = self.env_steps_done(cur_iter)
         end = time.time()
+        # Cumulative elapsed (includes previous sessions) — for FPS and wandb
         elapsed = end - self.start
         self.fps = int(env_steps / elapsed)
         if log:
-            # Calculate ETA
+            # Use session-local time for ETA and iter-time so they reflect
+            # actual current throughput, not inflated by cumulative history.
+            session_elapsed = end - self.session_start
             start_iter = cfg.LOKI.RESUME_ITER + 1
             iters_done = cur_iter - start_iter + 1
             iters_remaining = cfg.PPO.MAX_ITERS - cur_iter - 1
             if iters_done > 0:
-                secs_per_iter = elapsed / iters_done
+                secs_per_iter = session_elapsed / iters_done
                 eta_secs = secs_per_iter * iters_remaining
                 eta_h = int(eta_secs // 3600)
                 eta_m = int((eta_secs % 3600) // 60)
@@ -659,9 +665,9 @@ class LOKI:
                 elapsed_h = int(elapsed // 3600)
                 elapsed_m = int((elapsed % 3600) // 60)
                 elapsed_s = int(elapsed % 60)
-                progress = (iters_done / (cfg.PPO.MAX_ITERS - start_iter)) * 100
+                progress = (cur_iter + 1) / cfg.PPO.MAX_ITERS * 100
                 eta_str = (
-                    f"Progress: {progress:.1f}% ({iters_done}/{cfg.PPO.MAX_ITERS - start_iter}) | "
+                    f"Progress: {progress:.1f}% ({cur_iter + 1}/{cfg.PPO.MAX_ITERS}) | "
                     f"Elapsed: {elapsed_h:02d}:{elapsed_m:02d}:{elapsed_s:02d} | "
                     f"ETA: {eta_h:02d}:{eta_m:02d}:{eta_s:02d} | "
                     f"Iter time: {secs_per_iter:.2f}s"
