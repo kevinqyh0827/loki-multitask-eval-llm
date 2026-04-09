@@ -56,9 +56,12 @@ BUDGETS=("2e6" "5e6" "1e7" "2e7" "5e7")
 # Zero-shot episodes
 ZERO_SHOT_EPISODES=50
 
-# Scheduling
-STAGGER_TIME=15        # 15s between launches (lighter than full LOKI training)
-RAM_THRESHOLD=40000    # 40 GB free RAM minimum
+# Scheduling — Phase 1 (zero-shot) is lightweight (~3-5 GB RAM per job)
+# while Phase 2 (fine-tuning) is heavy (~15-25 GB RAM per job due to
+# 20 walkers x 32 envs + optimizer + buffers). Use separate limits.
+STAGGER_TIME_ZS=10       # Stagger for zero-shot (fast)
+STAGGER_TIME_FT=30       # Stagger for fine-tune (allow RAM to settle)
+RAM_THRESHOLD=40000      # 40 GB free RAM minimum
 
 # Phase-level log directory
 PIPELINE_START=$(date +%s)
@@ -94,30 +97,44 @@ get_free_ram() {
     free -m 2>/dev/null | awk '/^Mem:/ {print $7}'
 }
 
+# Phase 1 (zero-shot): lightweight inference, many concurrent
+# Phase 2 (fine-tune): heavy training (20 walkers, optimizer, buffers), few concurrent
+#
+# Per-job RAM usage:
+#   zero-shot:  ~3-5 GB RAM,  ~2-3 GB VRAM
+#   fine-tune:  ~15-25 GB RAM, ~8-12 GB VRAM
 detect_max_concurrent_per_gpu() {
     local gpu_mem=$(get_gpu_total_mem 0)
     if [ "$gpu_mem" -le 50000 ]; then
-        MAX_CONCURRENT_PER_GPU=5
+        MAX_CONCURRENT_PER_GPU_ZS=5     # A100-40GB: zero-shot
+        MAX_CONCURRENT_PER_GPU_FT=2     # A100-40GB: fine-tune
     elif [ "$gpu_mem" -le 100000 ]; then
-        MAX_CONCURRENT_PER_GPU=10
+        MAX_CONCURRENT_PER_GPU_ZS=10    # A100-80GB: zero-shot
+        MAX_CONCURRENT_PER_GPU_FT=3     # A100-80GB: fine-tune
     else
-        MAX_CONCURRENT_PER_GPU=16
+        MAX_CONCURRENT_PER_GPU_ZS=16    # H200: zero-shot
+        MAX_CONCURRENT_PER_GPU_FT=4     # H200: fine-tune
     fi
 }
 
-MAX_CONCURRENT_PER_GPU=0
+MAX_CONCURRENT_PER_GPU_ZS=0
+MAX_CONCURRENT_PER_GPU_FT=0
 if [ "$MAX_CONCURRENT_OVERRIDE" -gt 0 ]; then
-    MAX_CONCURRENT_PER_GPU=$MAX_CONCURRENT_OVERRIDE
+    MAX_CONCURRENT_PER_GPU_ZS=$MAX_CONCURRENT_OVERRIDE
+    MAX_CONCURRENT_PER_GPU_FT=$(( MAX_CONCURRENT_OVERRIDE < 4 ? MAX_CONCURRENT_OVERRIDE : 4 ))
 else
     detect_max_concurrent_per_gpu
 fi
 
-TOTAL_MAX=$((NUM_GPUS * MAX_CONCURRENT_PER_GPU))
+# Active limit — switched between phases
+TOTAL_MAX=$((NUM_GPUS * MAX_CONCURRENT_PER_GPU_ZS))
 
 echo "================================================================"
 echo "  Transfer Demo: obstacle <-> many_obstacle (HPC)"
 echo "================================================================"
-echo "  GPUs: ${NUM_GPUS}, Max per GPU: ${MAX_CONCURRENT_PER_GPU}, Total slots: ${TOTAL_MAX}"
+echo "  GPUs: ${NUM_GPUS}"
+echo "  Phase 1 (zero-shot): max ${MAX_CONCURRENT_PER_GPU_ZS}/GPU = $((NUM_GPUS * MAX_CONCURRENT_PER_GPU_ZS)) total"
+echo "  Phase 2 (fine-tune): max ${MAX_CONCURRENT_PER_GPU_FT}/GPU = $((NUM_GPUS * MAX_CONCURRENT_PER_GPU_FT)) total"
 echo "  Clusters: ${NUM_CLUSTERS}, Seed: ${SEED}"
 echo "  Budgets: ${BUDGETS[*]}"
 echo "================================================================"
@@ -185,7 +202,7 @@ launch() {
     local desc="${src}->${tgt} C${cluster}"
     [ -n "$budget" ] && desc="${desc} ${budget}"
 
-    echo "[LAUNCH] GPU ${gpu}: ${desc}"
+    echo "[LAUNCH] GPU ${gpu}: ${desc} ($(update_running; echo ${#RUNNING_PIDS[@]})/${TOTAL_MAX} slots used)"
 
     CUDA_VISIBLE_DEVICES=$gpu \
     bash scripts/transfer/run_single_transfer.sh \
@@ -196,7 +213,12 @@ launch() {
     GPU_JOB_COUNT[$gpu]=$(( ${GPU_JOB_COUNT[$gpu]} + 1 ))
     TOTAL_LAUNCHED=$((TOTAL_LAUNCHED + 1))
 
-    sleep $STAGGER_TIME
+    # Use different stagger times: zero-shot is fast, fine-tune needs more breathing room
+    if [ "$mode" = "zero_shot" ]; then
+        sleep $STAGGER_TIME_ZS
+    else
+        sleep $STAGGER_TIME_FT
+    fi
 }
 
 cleanup() {
@@ -364,10 +386,12 @@ echo -e "$P1_RESULTS"                                                           
 echo "================================================================"                 | tee -a "$PHASE1_LOG"
 echo ""
 
-# Reset counters for Phase 2
+# Reset counters for Phase 2 and switch to lower concurrency
 PHASE1_TOTAL=$TOTAL_LAUNCHED
 TOTAL_LAUNCHED=0
 RUNNING_PIDS=()
+TOTAL_MAX=$((NUM_GPUS * MAX_CONCURRENT_PER_GPU_FT))
+echo "[$(ts)] Switching to Phase 2 concurrency: ${MAX_CONCURRENT_PER_GPU_FT}/GPU = ${TOTAL_MAX} total" | tee -a "$PHASE1_LOG"
 
 # ==========================================================================
 # PHASE 2: Fine-tuning budget sweep
