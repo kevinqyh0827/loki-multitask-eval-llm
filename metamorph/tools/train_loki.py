@@ -161,26 +161,44 @@ def main():
     # when the resume="allow" API lookup was rate-limited by concurrent jobs.
     wandb_settings = wandb.Settings(init_timeout=60)
     max_retries = 3
+    wandb_ok = False
     for attempt in range(1, max_retries + 1):
         try:
             wandb.init(project=project, name=cfg.OUT_DIR, mode=wandb_mode,
                        settings=wandb_settings, **wandb_kwargs)
+            wandb_ok = True
             break
         except Exception as e:
             if attempt < max_retries:
                 wait = 15 * attempt + random.uniform(0, 10)
                 print(f"[WANDB] Init failed (attempt {attempt}/{max_retries}): {e}. Retrying in {wait:.0f}s...", flush=True)
                 time.sleep(wait)
-            else:
-                print(f"[WANDB] Init failed after {max_retries} attempts, falling back to offline: {e}", flush=True)
-                try:
-                    offline_settings = wandb.Settings(init_timeout=120)
-                    wandb.init(project=project, name=cfg.OUT_DIR, mode="offline",
-                               settings=offline_settings, **wandb_kwargs)
-                except Exception as e2:
-                    print(f"[WANDB] Offline init also failed: {e2}. Disabling wandb entirely.", flush=True)
-                    wandb.init(mode="disabled")
-    print(f"[WANDB] Ready — mode={wandb.run.settings.mode}, url={getattr(wandb.run, 'url', None) or 'offline/disabled'}", flush=True)
+
+    if not wandb_ok:
+        print(f"[WANDB] Online init failed after {max_retries} attempts, falling back to offline.", flush=True)
+        try:
+            # Don't pass resume kwarg — it's ignored in offline mode and can
+            # cause warnings or errors depending on wandb version.
+            offline_kwargs = {k: v for k, v in wandb_kwargs.items() if k != "resume"}
+            offline_settings = wandb.Settings(init_timeout=120)
+            wandb.init(project=project, name=cfg.OUT_DIR, mode="offline",
+                       settings=offline_settings, **offline_kwargs)
+            wandb_ok = True
+        except Exception as e2:
+            print(f"[WANDB] Offline init also failed: {e2}", flush=True)
+
+    if not wandb_ok:
+        print(f"[WANDB] Disabling wandb entirely — training will proceed without logging.", flush=True)
+        try:
+            wandb.init(mode="disabled")
+        except Exception:
+            # Last resort: monkey-patch wandb.log to no-op so training code
+            # doesn't crash on wandb.log() calls.
+            wandb.log = lambda *a, **kw: None
+            wandb.run = type("FakeRun", (), {"settings": type("S", (), {"mode": "disabled"})(), "url": None})()
+
+    print(f"[WANDB] Ready — mode={getattr(getattr(wandb, 'run', None), 'settings', type('S', (), {'mode': 'disabled'})()).mode}, "
+          f"url={getattr(wandb.run, 'url', None) or 'offline/disabled'}", flush=True)
     # Save the config
     dump_cfg()
     loki_train(args, train=cfg.LOKI.TRAIN)
