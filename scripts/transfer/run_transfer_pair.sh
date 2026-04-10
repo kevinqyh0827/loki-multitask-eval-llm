@@ -97,13 +97,17 @@ get_free_ram() {
 }
 
 detect_concurrency() {
+    # Fine-tune VRAM usage: ~0.5-1 GB per job (small TransformerModel + PPO buffers).
+    # The real bottleneck is SYSTEM RAM (~10-20 GB per job for 20 MuJoCo envs).
+    # So fine-tune concurrency is set based on expected RAM allocation / ~15 GB per job,
+    # divided across GPUs. The RAM_THRESHOLD gate (40 GB free) provides runtime safety.
     local gpu_mem=$(get_gpu_total_mem 0)
     if [ "$gpu_mem" -le 50000 ]; then
-        MAX_ZS_PER_GPU=5;  MAX_FT_PER_GPU=2
+        MAX_ZS_PER_GPU=5;  MAX_FT_PER_GPU=3     # A100-40GB
     elif [ "$gpu_mem" -le 100000 ]; then
-        MAX_ZS_PER_GPU=10; MAX_FT_PER_GPU=3
+        MAX_ZS_PER_GPU=10; MAX_FT_PER_GPU=5      # A100-80GB
     else
-        MAX_ZS_PER_GPU=16; MAX_FT_PER_GPU=4
+        MAX_ZS_PER_GPU=16; MAX_FT_PER_GPU=8      # H200-141GB
     fi
 }
 
