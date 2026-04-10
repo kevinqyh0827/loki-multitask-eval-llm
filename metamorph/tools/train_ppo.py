@@ -151,9 +151,13 @@ def main():
     wandb_kwargs["id"] = wandb_run_id
     wandb_kwargs["resume"] = "allow"
 
-    # Stagger concurrent wandb.init() calls to avoid API rate limits on HPC
-    stagger = random.uniform(0, 30)
-    print(f"[WANDB] Staggering init by {stagger:.0f}s", flush=True)
+    # Stagger concurrent wandb.init() calls to avoid API rate limits on HPC.
+    # With 8+ concurrent jobs, a 0-30s window causes overlapping inits that
+    # contend for the WandB API and timeout at 60s. Use a wider window and
+    # longer timeout to prevent cascading failures.
+    wandb_stagger_max = int(os.environ.get("WANDB_STAGGER_MAX", "120"))
+    stagger = random.uniform(0, wandb_stagger_max)
+    print(f"[WANDB] Staggering init by {stagger:.0f}s (max={wandb_stagger_max}s)", flush=True)
     time.sleep(stagger)
 
     project = os.environ.get("WANDB_PROJECT", "LOKI-transfer")
@@ -161,7 +165,8 @@ def main():
     print(f"[WANDB] Initializing mode={wandb_mode}, project={project}, "
           f"run_id={wandb_run_id}, name={cfg.OUT_DIR}", flush=True)
 
-    wandb_settings = wandb.Settings(init_timeout=60)
+    wandb_init_timeout = int(os.environ.get("WANDB_INIT_TIMEOUT", "180"))
+    wandb_settings = wandb.Settings(init_timeout=wandb_init_timeout)
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
@@ -178,7 +183,7 @@ def main():
                 print(f"[WANDB] Init failed after {max_retries} attempts, "
                       f"falling back to offline: {e}", flush=True)
                 try:
-                    offline_settings = wandb.Settings(init_timeout=120)
+                    offline_settings = wandb.Settings(init_timeout=wandb_init_timeout)
                     wandb.init(project=project, name=cfg.OUT_DIR, mode="offline",
                                settings=offline_settings, **wandb_kwargs)
                 except Exception as e2:

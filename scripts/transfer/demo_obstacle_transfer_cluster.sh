@@ -82,6 +82,11 @@ fi
 
 export MUJOCO_GL=egl
 export WANDB_PROJECT="LOKI-transfer"
+# Disable WandB online sync during training to avoid 5-min timeout per job
+# when compute nodes have slow/contended API access. Reward curves are saved
+# locally in Unimal-v0_results.json regardless. To upload to WandB later,
+# use: wandb sync <offline_run_dir> from a login node.
+export WANDB_MODE=disabled
 
 # ==================== GPU Detection ====================
 if [ "$NUM_GPUS" -eq 0 ]; then
@@ -435,27 +440,29 @@ echo "  WandB project: LOKI-transfer"                                   | tee -a
 echo "================================================================" | tee -a "$PHASE2_LOG"
 echo ""                                                                 | tee -a "$PHASE2_LOG"
 
-# obstacle -> many_obstacle
-if [ ${#AVAIL_OBS[@]} -gt 0 ]; then
-    echo "--- obstacle -> many_obstacle (${#AVAIL_OBS[@]} clusters x ${#BUDGETS[@]} budgets) ---" | tee -a "$PHASE2_LOG"
-    for C in "${AVAIL_OBS[@]}"; do
-        for B in "${BUDGETS[@]}"; do
-            echo "[$(ts)] [LAUNCH] finetune obstacle->many_obstacle C${C} ${B}" | tee -a "$PHASE2_LOG"
-            launch finetune obstacle many_obstacle "$C" "$B"
-        done
-    done
-fi
+# Launch order: budget-first, then cluster. This ensures:
+#   1. All cheap 2e6 jobs run first (fill slots, finish fast, free slots quickly)
+#   2. Expensive 5e7 jobs launch last (don't block slots while cheap jobs wait)
+#   3. All clusters get fair access to slots instead of C0 monopolizing them
+#
+# Without this: C0 grabs all 5 budgets (including 5e7 = 2hrs) before C1 starts.
+# With this:    All clusters get 2e6 first (~5min each), then 5e6, etc.
 
-# many_obstacle -> obstacle
-if [ ${#AVAIL_MANY[@]} -gt 0 ]; then
-    echo "--- many_obstacle -> obstacle (${#AVAIL_MANY[@]} clusters x ${#BUDGETS[@]} budgets) ---" | tee -a "$PHASE2_LOG"
-    for C in "${AVAIL_MANY[@]}"; do
-        for B in "${BUDGETS[@]}"; do
+for B in "${BUDGETS[@]}"; do
+    echo "--- Budget ${B}: obstacle -> many_obstacle (${#AVAIL_OBS[@]} clusters) ---" | tee -a "$PHASE2_LOG"
+    for C in "${AVAIL_OBS[@]}"; do
+        echo "[$(ts)] [LAUNCH] finetune obstacle->many_obstacle C${C} ${B}" | tee -a "$PHASE2_LOG"
+        launch finetune obstacle many_obstacle "$C" "$B"
+    done
+
+    if [ ${#AVAIL_MANY[@]} -gt 0 ]; then
+        echo "--- Budget ${B}: many_obstacle -> obstacle (${#AVAIL_MANY[@]} clusters) ---" | tee -a "$PHASE2_LOG"
+        for C in "${AVAIL_MANY[@]}"; do
             echo "[$(ts)] [LAUNCH] finetune many_obstacle->obstacle C${C} ${B}" | tee -a "$PHASE2_LOG"
             launch finetune many_obstacle obstacle "$C" "$B"
         done
-    done
-fi
+    fi
+done
 
 echo ""                                                                 | tee -a "$PHASE2_LOG"
 echo "[$(ts)] Waiting for ${TOTAL_LAUNCHED} fine-tune jobs..."          | tee -a "$PHASE2_LOG"
