@@ -71,7 +71,7 @@ def get_loki_baseline_reward(loki_dir, task, cluster, num_clusters, seed):
         return None
     best = -float("inf")
     for aid, ad in data.items():
-        if aid.startswith("_"):
+        if aid.startswith("_") or not isinstance(ad, dict):
             continue
         rewards = ad.get("reward", {}).get("reward", [])
         if rewards:
@@ -107,7 +107,7 @@ def get_finetune_reward(transfer_dir, src, tgt, cluster, budget, seed):
         return None
     best = -float("inf")
     for aid, ad in data.items():
-        if aid.startswith("_"):
+        if aid.startswith("_") or not isinstance(ad, dict):
             continue
         rewards = ad.get("reward", {}).get("reward", [])
         if rewards:
