@@ -184,8 +184,8 @@ def main():
     parser.add_argument("--task_a", required=True, help="First task (e.g. ft, obstacle)")
     parser.add_argument("--task_b", required=True, help="Second task (e.g. incline, many_obstacle)")
     parser.add_argument("--transfer_dir", default="metamorph/output/transfer")
-    parser.add_argument("--loki_dir", default="metamorph/output/loki")
-    parser.add_argument("--num_clusters", type=int, default=20)
+    parser.add_argument("--loki_dir", default="metamorph/output/loki_500k")
+    parser.add_argument("--num_clusters", type=int, default=40)
     parser.add_argument("--seed", type=int, default=3429)
     args = parser.parse_args()
 

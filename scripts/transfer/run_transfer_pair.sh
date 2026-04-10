@@ -25,8 +25,9 @@
 #   $2  task_b       Second task (required, e.g. "incline", "many_obstacle")
 #   $3  num_gpus     Number of GPUs (default: auto-detect)
 #   $4  max_ft_gpu   Max concurrent fine-tune per GPU (default: auto-detect)
-#   $5  num_clusters Total clusters (default: 20)
+#   $5  num_clusters Total clusters (default: 40)
 #   $6  seed         Random seed (default: 3429)
+#   $7  loki_base    LOKI output base dir relative to metamorph/ (default: "output/loki_500k")
 # =============================================================================
 
 #SBATCH --job-name=loki-transfer
@@ -41,12 +42,13 @@
 set -e
 
 # ==================== Arguments ====================
-TASK_A="${1:?Usage: $0 <task_a> <task_b> [num_gpus] [max_ft_gpu] [num_clusters] [seed]}"
-TASK_B="${2:?Usage: $0 <task_a> <task_b> [num_gpus] [max_ft_gpu] [num_clusters] [seed]}"
+TASK_A="${1:?Usage: $0 <task_a> <task_b> [num_gpus] [max_ft_gpu] [num_clusters] [seed] [loki_base]}"
+TASK_B="${2:?Usage: $0 <task_a> <task_b> [num_gpus] [max_ft_gpu] [num_clusters] [seed] [loki_base]}"
 NUM_GPUS=${3:-0}
 MAX_FT_OVERRIDE=${4:-0}
-NUM_CLUSTERS=${5:-20}
+NUM_CLUSTERS=${5:-40}
 SEED=${6:-3429}
+LOKI_BASE=${7:-"output/loki_500k"}   # Path to LOKI training outputs, relative to metamorph/
 
 NUM_WALKER=20
 DROP_FREQ=2
@@ -127,6 +129,7 @@ echo "  GPUs: ${NUM_GPUS}"
 echo "  Phase 1 (zero-shot): max ${MAX_ZS_PER_GPU}/GPU = $((NUM_GPUS * MAX_ZS_PER_GPU)) total"
 echo "  Phase 2 (fine-tune): max ${MAX_FT_PER_GPU}/GPU = $((NUM_GPUS * MAX_FT_PER_GPU)) total"
 echo "  Clusters: ${NUM_CLUSTERS}, Seed: ${SEED}"
+echo "  LOKI base: metamorph/${LOKI_BASE}/"
 echo "  Budgets: ${BUDGETS[*]}"
 echo "  Logs: ${PHASE_LOG_DIR}/"
 echo "================================================================"
@@ -152,7 +155,7 @@ get_task_dir() {
 has_source_ckpt() {
     local task=$1 cluster=$2
     local dir=$(get_task_dir "$task")
-    [ -f "metamorph/output/loki/${dir}/kmeans_cluster/${NUM_CLUSTERS}/${cluster}/walker${NUM_WALKER}/freq${DROP_FREQ}/drop${NUM_DROP}/seed${SEED}/Unimal-v0.pt" ]
+    [ -f "metamorph/${LOKI_BASE}/${dir}/kmeans_cluster/${NUM_CLUSTERS}/${cluster}/walker${NUM_WALKER}/freq${DROP_FREQ}/drop${NUM_DROP}/seed${SEED}/Unimal-v0.pt" ]
 }
 
 update_running() {
@@ -196,7 +199,7 @@ launch() {
     CUDA_VISIBLE_DEVICES=$gpu \
     bash scripts/transfer/run_single_transfer.sh \
         "$mode" "$src" "$tgt" "$cluster" "$SEED" "$NUM_CLUSTERS" \
-        "$budget" "$ZERO_SHOT_EPISODES" &
+        "$budget" "$ZERO_SHOT_EPISODES" "$LOKI_BASE" &
 
     RUNNING_PIDS+=($!)
     GPU_JOB_COUNT[$gpu]=$(( ${GPU_JOB_COUNT[$gpu]} + 1 ))

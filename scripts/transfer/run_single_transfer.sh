@@ -10,7 +10,7 @@
 #
 # Usage:
 #   bash scripts/transfer/run_single_transfer.sh <mode> <src_task> <tgt_task> \
-#       <cluster> <seed> <num_clusters> [budget] [num_episodes]
+#       <cluster> <seed> <num_clusters> [budget] [num_episodes] [loki_base]
 #
 # Arguments:
 #   mode:         "zero_shot" | "finetune"
@@ -21,13 +21,15 @@
 #   num_clusters: Total cluster count (e.g., 20 or 40)
 #   budget:       Fine-tune budget in env steps (required for finetune mode, e.g., "2e7")
 #   num_episodes: Zero-shot eval episodes (default: 50, ignored in finetune mode)
+#   loki_base:    Base dir for LOKI training outputs, relative to metamorph/
+#                 (default: "output/loki", use "output/loki_500k" for 500K morphology runs)
 #
 # Examples:
-#   # Zero-shot: obstacle policy evaluated on many_obstacle
+#   # Zero-shot with 20-cluster (default path)
 #   bash scripts/transfer/run_single_transfer.sh zero_shot obstacle many_obstacle 18 3429 20
 #
-#   # Fine-tune: obstacle policy fine-tuned on many_obstacle for 20M steps
-#   bash scripts/transfer/run_single_transfer.sh finetune obstacle many_obstacle 18 3429 20 2e7
+#   # Fine-tune with 40-cluster, 500K morphology data
+#   bash scripts/transfer/run_single_transfer.sh finetune ft incline 18 3429 40 2e7 50 output/loki_500k
 # =============================================================================
 
 set -e
@@ -40,6 +42,7 @@ SEED=$5
 NUM_CLUSTERS=$6
 BUDGET=${7:-""}
 NUM_EPISODES=${8:-50}
+LOKI_BASE=${9:-"output/loki"}   # Base dir for LOKI training outputs (relative to metamorph/)
 
 NUM_WALKER=20
 DROP_FREQ=2
@@ -47,7 +50,7 @@ NUM_DROP=2
 
 if [ -z "$MODE" ] || [ -z "$SRC_TASK" ] || [ -z "$TGT_TASK" ] || \
    [ -z "$CLUSTER" ] || [ -z "$SEED" ] || [ -z "$NUM_CLUSTERS" ]; then
-    echo "Usage: bash scripts/transfer/run_single_transfer.sh <mode> <src_task> <tgt_task> <cluster> <seed> <num_clusters> [budget] [num_episodes]"
+    echo "Usage: bash scripts/transfer/run_single_transfer.sh <mode> <src_task> <tgt_task> <cluster> <seed> <num_clusters> [budget] [num_episodes] [loki_base]"
     exit 1
 fi
 
@@ -77,7 +80,7 @@ SRC_DIR=$(get_task_dir "$SRC_TASK")
 TGT_CFG=$(get_task_cfg "$TGT_TASK")
 
 # --- Source checkpoint path ---
-SRC_CKPT_BASE="output/loki/${SRC_DIR}/kmeans_cluster/${NUM_CLUSTERS}/${CLUSTER}/walker${NUM_WALKER}/freq${DROP_FREQ}/drop${NUM_DROP}/seed${SEED}"
+SRC_CKPT_BASE="${LOKI_BASE}/${SRC_DIR}/kmeans_cluster/${NUM_CLUSTERS}/${CLUSTER}/walker${NUM_WALKER}/freq${DROP_FREQ}/drop${NUM_DROP}/seed${SEED}"
 
 # Verify source checkpoint exists
 if [ ! -f "metamorph/${SRC_CKPT_BASE}/Unimal-v0.pt" ]; then
