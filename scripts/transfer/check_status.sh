@@ -10,12 +10,12 @@
 #   bash scripts/transfer/check_status.sh [transfer_output_dir]
 #
 # Expected directory structure:
-#   metamorph/output/transfer/
+#   metamorph/output/transfer_500k/  (or metamorph/output/transfer/ for old 20-cluster runs)
 #     zero_shot/{pair}/c{C}/seed{S}/eval_results.json
 #     finetune/{pair}/c{C}/steps_{B}/seed{S}/Unimal-v0_results.json
 # =============================================================================
 
-TRANSFER_DIR="${1:-metamorph/output/transfer}"
+TRANSFER_DIR="${1:-metamorph/output/transfer_500k}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TRANSFER_DIR="${PROJECT_ROOT}/${TRANSFER_DIR}"
 

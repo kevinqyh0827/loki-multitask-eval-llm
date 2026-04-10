@@ -10,26 +10,28 @@
 #
 # Usage:
 #   bash scripts/transfer/run_single_transfer.sh <mode> <src_task> <tgt_task> \
-#       <cluster> <seed> <num_clusters> [budget] [num_episodes] [loki_base]
+#       <cluster> <seed> <num_clusters> [budget] [num_episodes] [loki_base] [transfer_base]
 #
 # Arguments:
-#   mode:         "zero_shot" | "finetune"
-#   src_task:     Source task name (e.g., "obstacle", "ft")
-#   tgt_task:     Target task name (e.g., "many_obstacle", "bump")
-#   cluster:      Cluster index (e.g., 18)
-#   seed:         Random seed (e.g., 3429)
-#   num_clusters: Total cluster count (e.g., 20 or 40)
-#   budget:       Fine-tune budget in env steps (required for finetune mode, e.g., "2e7")
-#   num_episodes: Zero-shot eval episodes (default: 50, ignored in finetune mode)
-#   loki_base:    Base dir for LOKI training outputs, relative to metamorph/
-#                 (default: "output/loki", use "output/loki_500k" for 500K morphology runs)
+#   mode:           "zero_shot" | "finetune"
+#   src_task:       Source task name (e.g., "obstacle", "ft")
+#   tgt_task:       Target task name (e.g., "many_obstacle", "bump")
+#   cluster:        Cluster index (e.g., 18)
+#   seed:           Random seed (e.g., 3429)
+#   num_clusters:   Total cluster count (e.g., 20 or 40)
+#   budget:         Fine-tune budget in env steps (required for finetune mode, e.g., "2e7")
+#   num_episodes:   Zero-shot eval episodes (default: 50, ignored in finetune mode)
+#   loki_base:      Base dir for LOKI training outputs, relative to metamorph/
+#                   (default: "output/loki", use "output/loki_500k" for 500K morphology runs)
+#   transfer_base:  Base dir for transfer experiment outputs, relative to metamorph/
+#                   (default: "output/transfer", use "output/transfer_500k" for 500K experiments)
 #
 # Examples:
 #   # Zero-shot with 20-cluster (default path)
 #   bash scripts/transfer/run_single_transfer.sh zero_shot obstacle many_obstacle 18 3429 20
 #
-#   # Fine-tune with 40-cluster, 500K morphology data
-#   bash scripts/transfer/run_single_transfer.sh finetune ft incline 18 3429 40 2e7 50 output/loki_500k
+#   # Fine-tune with 40-cluster, 500K morphology data, separate output dir
+#   bash scripts/transfer/run_single_transfer.sh finetune ft incline 18 3429 40 2e7 50 output/loki_500k output/transfer_500k
 # =============================================================================
 
 set -e
@@ -42,7 +44,8 @@ SEED=$5
 NUM_CLUSTERS=$6
 BUDGET=${7:-""}
 NUM_EPISODES=${8:-50}
-LOKI_BASE=${9:-"output/loki"}   # Base dir for LOKI training outputs (relative to metamorph/)
+LOKI_BASE=${9:-"output/loki"}          # Base dir for LOKI training outputs (relative to metamorph/)
+TRANSFER_BASE=${10:-"output/transfer"} # Base dir for transfer experiment outputs (relative to metamorph/)
 
 NUM_WALKER=20
 DROP_FREQ=2
@@ -50,7 +53,7 @@ NUM_DROP=2
 
 if [ -z "$MODE" ] || [ -z "$SRC_TASK" ] || [ -z "$TGT_TASK" ] || \
    [ -z "$CLUSTER" ] || [ -z "$SEED" ] || [ -z "$NUM_CLUSTERS" ]; then
-    echo "Usage: bash scripts/transfer/run_single_transfer.sh <mode> <src_task> <tgt_task> <cluster> <seed> <num_clusters> [budget] [num_episodes] [loki_base]"
+    echo "Usage: bash scripts/transfer/run_single_transfer.sh <mode> <src_task> <tgt_task> <cluster> <seed> <num_clusters> [budget] [num_episodes] [loki_base] [transfer_base]"
     exit 1
 fi
 
@@ -99,10 +102,10 @@ fi
 PAIR="${SRC_TASK}_to_${TGT_TASK}"
 
 if [ "$MODE" = "zero_shot" ]; then
-    OUT_DIR="output/transfer/zero_shot/${PAIR}/c${CLUSTER}/seed${SEED}"
+    OUT_DIR="${TRANSFER_BASE}/zero_shot/${PAIR}/c${CLUSTER}/seed${SEED}"
     RESULT_MARKER="eval_results.json"
 else
-    OUT_DIR="output/transfer/finetune/${PAIR}/c${CLUSTER}/steps_${BUDGET}/seed${SEED}"
+    OUT_DIR="${TRANSFER_BASE}/finetune/${PAIR}/c${CLUSTER}/steps_${BUDGET}/seed${SEED}"
     RESULT_MARKER="Unimal-v0_results.json"
 fi
 

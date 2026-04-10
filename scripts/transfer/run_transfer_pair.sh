@@ -21,13 +21,14 @@
 #   bash scripts/transfer/run_transfer_pair.sh ft patrol 0 0 40
 #
 # Arguments:
-#   $1  task_a       First task  (required, e.g. "ft", "obstacle", "bump")
-#   $2  task_b       Second task (required, e.g. "incline", "many_obstacle")
-#   $3  num_gpus     Number of GPUs (default: auto-detect)
-#   $4  max_ft_gpu   Max concurrent fine-tune per GPU (default: auto-detect)
-#   $5  num_clusters Total clusters (default: 40)
-#   $6  seed         Random seed (default: 3429)
-#   $7  loki_base    LOKI output base dir relative to metamorph/ (default: "output/loki_500k")
+#   $1  task_a         First task  (required, e.g. "ft", "obstacle", "bump")
+#   $2  task_b         Second task (required, e.g. "incline", "many_obstacle")
+#   $3  num_gpus       Number of GPUs (default: auto-detect)
+#   $4  max_ft_gpu     Max concurrent fine-tune per GPU (default: auto-detect)
+#   $5  num_clusters   Total clusters (default: 40)
+#   $6  seed           Random seed (default: 3429)
+#   $7  loki_base      LOKI output base dir relative to metamorph/ (default: "output/loki_500k")
+#   $8  transfer_base  Transfer output base dir relative to metamorph/ (default: "output/transfer_500k")
 # =============================================================================
 
 #SBATCH --job-name=loki-transfer
@@ -42,13 +43,14 @@
 set -e
 
 # ==================== Arguments ====================
-TASK_A="${1:?Usage: $0 <task_a> <task_b> [num_gpus] [max_ft_gpu] [num_clusters] [seed] [loki_base]}"
-TASK_B="${2:?Usage: $0 <task_a> <task_b> [num_gpus] [max_ft_gpu] [num_clusters] [seed] [loki_base]}"
+TASK_A="${1:?Usage: $0 <task_a> <task_b> [num_gpus] [max_ft_gpu] [num_clusters] [seed] [loki_base] [transfer_base]}"
+TASK_B="${2:?Usage: $0 <task_a> <task_b> [num_gpus] [max_ft_gpu] [num_clusters] [seed] [loki_base] [transfer_base]}"
 NUM_GPUS=${3:-0}
 MAX_FT_OVERRIDE=${4:-0}
 NUM_CLUSTERS=${5:-40}
 SEED=${6:-3429}
-LOKI_BASE=${7:-"output/loki_500k"}   # Path to LOKI training outputs, relative to metamorph/
+LOKI_BASE=${7:-"output/loki_500k"}        # Path to LOKI training outputs, relative to metamorph/
+TRANSFER_BASE=${8:-"output/transfer_500k"} # Path to transfer experiment outputs, relative to metamorph/
 
 NUM_WALKER=20
 DROP_FREQ=2
@@ -130,6 +132,7 @@ echo "  Phase 1 (zero-shot): max ${MAX_ZS_PER_GPU}/GPU = $((NUM_GPUS * MAX_ZS_PE
 echo "  Phase 2 (fine-tune): max ${MAX_FT_PER_GPU}/GPU = $((NUM_GPUS * MAX_FT_PER_GPU)) total"
 echo "  Clusters: ${NUM_CLUSTERS}, Seed: ${SEED}"
 echo "  LOKI base: metamorph/${LOKI_BASE}/"
+echo "  Transfer experiments output: metamorph/${TRANSFER_BASE}/"
 echo "  Budgets: ${BUDGETS[*]}"
 echo "  Logs: ${PHASE_LOG_DIR}/"
 echo "================================================================"
@@ -199,7 +202,7 @@ launch() {
     CUDA_VISIBLE_DEVICES=$gpu \
     bash scripts/transfer/run_single_transfer.sh \
         "$mode" "$src" "$tgt" "$cluster" "$SEED" "$NUM_CLUSTERS" \
-        "$budget" "$ZERO_SHOT_EPISODES" "$LOKI_BASE" &
+        "$budget" "$ZERO_SHOT_EPISODES" "$LOKI_BASE" "$TRANSFER_BASE" &
 
     RUNNING_PIDS+=($!)
     GPU_JOB_COUNT[$gpu]=$(( ${GPU_JOB_COUNT[$gpu]} + 1 ))
@@ -266,7 +269,7 @@ PHASE1_EXPECTED=$((${#AVAIL_A[@]} + ${#AVAIL_B[@]}))
 
 echo "================================================================"              | tee "$PHASE1_LOG"
 echo "[$(ts)] PHASE 1: Zero-shot (${PHASE1_EXPECTED} jobs)"                          | tee -a "$PHASE1_LOG"
-echo "  Output: metamorph/output/transfer/zero_shot/{pair}/c{C}/seed${SEED}/"        | tee -a "$PHASE1_LOG"
+echo "  Output: metamorph/${TRANSFER_BASE}/zero_shot/{pair}/c{C}/seed${SEED}/"       | tee -a "$PHASE1_LOG"
 echo "  Result: eval_results.json"                                                   | tee -a "$PHASE1_LOG"
 echo "================================================================"              | tee -a "$PHASE1_LOG"
 
@@ -299,7 +302,7 @@ check_zero_shot() {
     shift 2
     local clusters=("$@")
     for C in "${clusters[@]}"; do
-        local F="metamorph/output/transfer/zero_shot/${src}_to_${tgt}/c${C}/seed${SEED}/eval_results.json"
+        local F="metamorph/${TRANSFER_BASE}/zero_shot/${src}_to_${tgt}/c${C}/seed${SEED}/eval_results.json"
         if [ -f "$F" ]; then
             local MEAN=$(python3 -c "import json; d=json.load(open('$F')); print(f'{d[\"mean_reward\"]:.1f}')" 2>/dev/null || echo "?")
             local STD=$(python3 -c "import json; d=json.load(open('$F')); print(f'{d[\"std_reward\"]:.1f}')" 2>/dev/null || echo "?")
@@ -336,7 +339,7 @@ PHASE2_EXPECTED=$(( (${#AVAIL_A[@]} + ${#AVAIL_B[@]}) * ${#BUDGETS[@]} ))
 echo "================================================================"              | tee "$PHASE2_LOG"
 echo "[$(ts)] PHASE 2: Fine-tuning (${PHASE2_EXPECTED} jobs)"                        | tee -a "$PHASE2_LOG"
 echo "  Concurrency: ${MAX_FT_PER_GPU}/GPU = ${TOTAL_MAX} total"                    | tee -a "$PHASE2_LOG"
-echo "  Output: metamorph/output/transfer/finetune/{pair}/c{C}/steps_{B}/seed${SEED}/" | tee -a "$PHASE2_LOG"
+echo "  Output: metamorph/${TRANSFER_BASE}/finetune/{pair}/c{C}/steps_{B}/seed${SEED}/" | tee -a "$PHASE2_LOG"
 echo "  Result: Unimal-v0_results.json"                                              | tee -a "$PHASE2_LOG"
 echo "================================================================"              | tee -a "$PHASE2_LOG"
 
@@ -373,7 +376,7 @@ check_finetune() {
     local clusters=("$@")
     for C in "${clusters[@]}"; do
         for B in "${BUDGETS[@]}"; do
-            local F="metamorph/output/transfer/finetune/${src}_to_${tgt}/c${C}/steps_${B}/seed${SEED}/Unimal-v0_results.json"
+            local F="metamorph/${TRANSFER_BASE}/finetune/${src}_to_${tgt}/c${C}/steps_${B}/seed${SEED}/Unimal-v0_results.json"
             if [ -f "$F" ]; then
                 echo "  [DONE] ${src}->${tgt} C${C} ${B}" | tee -a "$PHASE2_LOG"
                 P2_DONE=$((P2_DONE + 1))
@@ -410,12 +413,11 @@ echo ""
 echo "  Logs: ${PHASE_LOG_DIR}/"
 echo ""
 echo "  Next steps:"
-echo "    bash scripts/transfer/check_status.sh"
+echo "    bash scripts/transfer/check_status.sh metamorph/${TRANSFER_BASE}"
 echo "    python scripts/transfer/aggregate_demo_results.py \\"
-echo "      --transfer_dir metamorph/output/transfer \\"
-echo "      --loki_dir metamorph/output/loki \\"
-echo "      --clusters \"${AVAIL_A[*]}\" \\"
-echo "      --clusters_reverse \"${AVAIL_B[*]}\" \\"
+echo "      --task_a ${TASK_A} --task_b ${TASK_B} \\"
+echo "      --transfer_dir metamorph/${TRANSFER_BASE} \\"
+echo "      --loki_dir metamorph/${LOKI_BASE} \\"
 echo "      --num_clusters ${NUM_CLUSTERS} --seed ${SEED}"
 echo "================================================================"
 } | tee "$SUMMARY_LOG"
