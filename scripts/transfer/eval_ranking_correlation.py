@@ -208,7 +208,7 @@ def evaluate_per_agent(checkpoint_path, task, walker_dir, out_dir,
             if "episode" in info:
                 agent_rewards[info["name"]].append(info["episode"]["r"])
                 collected += 1
-        if all(len(v) >= num_episodes for v in agent_rewards.values()):
+        if agent_rewards and all(len(v) >= num_episodes for v in agent_rewards.values()):
             break
 
     envs.close()
