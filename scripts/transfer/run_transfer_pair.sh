@@ -277,6 +277,11 @@ echo "================================================================"         
 if [ ${#AVAIL_A[@]} -gt 0 ]; then
     echo "--- ${TASK_A} -> ${TASK_B} (${#AVAIL_A[@]} clusters) ---" | tee -a "$PHASE1_LOG"
     for C in "${AVAIL_A[@]}"; do
+        ZS_OUT="metamorph/${TRANSFER_BASE}/zero_shot/${TASK_A}_to_${TASK_B}/c${C}/seed${SEED}/eval_results.json"
+        if [ -f "$ZS_OUT" ]; then
+            echo "[$(ts)] [SKIP] Already done: zero_shot ${TASK_A}->${TASK_B} C${C}" | tee -a "$PHASE1_LOG"
+            continue
+        fi
         launch zero_shot "$TASK_A" "$TASK_B" "$C"
     done
 fi
@@ -285,6 +290,11 @@ fi
 if [ ${#AVAIL_B[@]} -gt 0 ]; then
     echo "--- ${TASK_B} -> ${TASK_A} (${#AVAIL_B[@]} clusters) ---" | tee -a "$PHASE1_LOG"
     for C in "${AVAIL_B[@]}"; do
+        ZS_OUT="metamorph/${TRANSFER_BASE}/zero_shot/${TASK_B}_to_${TASK_A}/c${C}/seed${SEED}/eval_results.json"
+        if [ -f "$ZS_OUT" ]; then
+            echo "[$(ts)] [SKIP] Already done: zero_shot ${TASK_B}->${TASK_A} C${C}" | tee -a "$PHASE1_LOG"
+            continue
+        fi
         launch zero_shot "$TASK_B" "$TASK_A" "$C"
     done
 fi
@@ -350,6 +360,11 @@ for B in "${BUDGETS[@]}"; do
 
     # A -> B
     for C in "${AVAIL_A[@]}"; do
+        FT_OUT="metamorph/${TRANSFER_BASE}/finetune/${TASK_A}_to_${TASK_B}/c${C}/steps_${B}/seed${SEED}/Unimal-v0_results.json"
+        if [ -f "$FT_OUT" ]; then
+            echo "[$(ts)] [SKIP] Already done: ${TASK_A}->${TASK_B} C${C} ${B}" | tee -a "$PHASE2_LOG"
+            continue
+        fi
         echo "[$(ts)] [LAUNCH] ${TASK_A}->${TASK_B} C${C} ${B}" | tee -a "$PHASE2_LOG"
         launch finetune "$TASK_A" "$TASK_B" "$C" "$B"
     done
@@ -357,6 +372,11 @@ for B in "${BUDGETS[@]}"; do
     # B -> A
     if [ ${#AVAIL_B[@]} -gt 0 ]; then
         for C in "${AVAIL_B[@]}"; do
+            FT_OUT="metamorph/${TRANSFER_BASE}/finetune/${TASK_B}_to_${TASK_A}/c${C}/steps_${B}/seed${SEED}/Unimal-v0_results.json"
+            if [ -f "$FT_OUT" ]; then
+                echo "[$(ts)] [SKIP] Already done: ${TASK_B}->${TASK_A} C${C} ${B}" | tee -a "$PHASE2_LOG"
+                continue
+            fi
             echo "[$(ts)] [LAUNCH] ${TASK_B}->${TASK_A} C${C} ${B}" | tee -a "$PHASE2_LOG"
             launch finetune "$TASK_B" "$TASK_A" "$C" "$B"
         done
